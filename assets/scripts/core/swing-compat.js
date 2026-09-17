@@ -75,33 +75,56 @@
     if (player._swingSprite) player._swingSprite.setScale(player.p?.isMini ? 0.6 : 1);
   }
 
-  function syncSwingSprite(player, dt = 0) {
+  function syncSwingCeiling(player) {
+    const scene = player?._scene;
+    const layer = player?._gameLayer;
+    if (!scene || !layer) return;
+
+    const ceiling = Number(layer.getCeilingY?.());
+    if (!Number.isFinite(ceiling)) return;
+
+    if (!player._swingCeilingGuide) {
+      player._swingCeilingGuide = scene.add.graphics()
+        .setScrollFactor(0)
+        .setDepth(10);
+    }
+
+    const cameraY = Number(scene._cameraY) || 0;
+    const screenY = b(ceiling) + cameraY;
+    const width = typeof screenWidth === 'number' ? screenWidth : 1200;
+
+    player._swingCeilingGuide.clear();
+    player._swingCeilingGuide.lineStyle(4, 0xffffff, 0.35);
+    player._swingCeilingGuide.beginPath();
+    player._swingCeilingGuide.moveTo(0, screenY);
+    player._swingCeilingGuide.lineTo(width, screenY);
+    player._swingCeilingGuide.strokePath();
+    player._swingCeilingGuide.setVisible(!!player.p?.isSwing);
+  }
+
+  function syncSwingSprite(player) {
     if (!player?.p?.isSwing) return;
     makeSwingSprite(player);
     if (!player._swingBase) return;
 
-    // The Swing stays on the player's horizontal screen anchor. It must not
-    // use world X or an animated X offset, which caused the icon to drift away.
     const x = player.p.mirrored
       ? (typeof screenWidth === 'number' ? screenWidth - centerX : centerX)
       : centerX;
     const y = Number.isFinite(player._lastScreenY) ? player._lastScreenY : b(player.p.y);
     const mini = player.p.isMini ? 0.6 : 1;
-
-    // Swing points in the direction of gravity. Do not rotate it 180 degrees:
-    // the atlas artwork itself contains the correct orientation.
-    const rotation = 0;
     const layers = [player._swingGlow, player._swingBase, player._swingOverlay, player._swingExtra];
+
     for (const spr of layers) {
       if (!spr) continue;
       spr.x = x;
       spr.y = y;
-      spr.rotation = rotation;
+      spr.rotation = 0;
       spr.scaleX = player.p.mirrored ? -mini : mini;
       spr.scaleY = mini;
       spr.setVisible(true);
     }
     tintSwingLayers(player);
+    syncSwingCeiling(player);
   }
 
   function clampSwingToBounds(player) {
@@ -131,7 +154,6 @@
     if (!player?.p || player.p.isSwing) return;
     const gravityAtEntry = !!player.p.gravityFlipped;
 
-    // Exit the old mode first, then restore the exact gravity from the portal.
     player.exitSpiderMode?.();
     player.exitRobotMode?.();
     player.exitBallMode?.();
@@ -165,6 +187,7 @@
     player.setSpiderVisible?.(false);
     player.setRobotVisible?.(false);
     setSwingVisible(player, true);
+    syncSwingCeiling(player);
     clampSwingToBounds(player);
   }
 
@@ -177,6 +200,7 @@
     player.p.isJumping = false;
     player.p.yVelocity = 0;
     setSwingVisible(player, false);
+    if (player._swingCeilingGuide) player._swingCeilingGuide.setVisible(false);
     player.setCubeVisible(!player.p.isFlying && !player.p.isWave && !player.p.isUfo && !player.p.isSpider && !player.p.isRobot);
   }
 
@@ -253,9 +277,6 @@
           }
         }
 
-        // Do not let the same collision pass continue through the old portal
-        // chain after entering Swing. That was immediately re-processing the
-        // portal and could flip gravity or put the player into Ship.
         if (enteredThisFrame) {
           this._lastCollisionWorldX = Number(args[0]) + (typeof centerX === 'number' ? centerX : 0);
           this._lastCollisionWorldY = this.p.y;
@@ -263,16 +284,12 @@
         }
 
         if (this.p?.isSwing) {
-          // Native collision code already has the correct Ship/Fly treatment
-          // for floor and ceiling. Temporarily expose Swing as aerial only
-          // while collision is calculated; restore Swing immediately after.
           const savedFlying = this.p.isFlying;
           const savedGround = this.p.onGround;
           const savedCeiling = this.p.onCeiling;
           this.p.isFlying = true;
           try {
-            const result = originalCheckCollisions.apply(this, args);
-            return result;
+            return originalCheckCollisions.apply(this, args);
           } finally {
             this.p.isFlying = savedFlying;
             this.p.onGround = savedGround;
@@ -281,6 +298,7 @@
             this.setShipVisible(false);
             setSwingVisible(this, true);
             clampSwingToBounds(this);
+            syncSwingCeiling(this);
           }
         }
 
@@ -295,7 +313,8 @@
         const result = originalSyncSprites.apply(this, args);
         if (this.p?.isSwing) {
           setSwingVisible(this, true);
-          syncSwingSprite(this, Number(args[2]) || 0);
+          syncSwingSprite(this);
+          syncSwingCeiling(this);
           this.setCubeVisible(false);
           this.setShipVisible(false);
           this.setBallVisible?.(false);
@@ -304,6 +323,7 @@
           this.setRobotVisible?.(false);
         } else if (this._swingSprite) {
           setSwingVisible(this, false);
+          if (this._swingCeilingGuide) this._swingCeilingGuide.setVisible(false);
         }
         return result;
       };
