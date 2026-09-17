@@ -6,9 +6,6 @@
   window.__gd22SwingCompatLoaded = true;
 
   const SWING_PORTAL_ID = 1933;
-  const SWING_GRAVITY = 0.72;
-  const SWING_CLICK_VELOCITY = 10.5;
-  const SWING_MAX_VELOCITY = 18;
 
   function setSwingVisibility(player, visible) {
     if (!player) return;
@@ -21,7 +18,6 @@
       ];
       for (const frame of candidates) {
         try {
-          // Use the same atlas resolver used by the rest of Web Dashers.
           if (typeof addImageToScene === "function") {
             const sprite = addImageToScene(scene, 0, 0, frame);
             if (sprite) {
@@ -56,7 +52,6 @@
     player._swingSprite.setRotation(player.p.gravityFlipped ? Math.PI : 0);
     player._swingSprite.setVisible(true);
 
-    // Swing must never leave the ship visible while this mode is active.
     player.setShipVisible(false);
     player.setCubeVisible(false);
     player.setBallVisible(false);
@@ -87,7 +82,7 @@
     if (portal && Number.isFinite(portal.portalY)) player.p.y = portal.portalY;
 
     player.stopRotation?.();
-    player._rotation = 0;
+    player._rotation = player.p.gravityFlipped ? Math.PI : 0;
     player.setCubeVisible(false);
     player.setShipVisible(false);
     player.setBallVisible(false);
@@ -113,11 +108,12 @@
   function swingClick(player) {
     if (!player?.p?.isSwing || player.p.isDead) return;
     player.p.gravityFlipped = !player.p.gravityFlipped;
-    player.p.yVelocity = player.p.gravityFlipped ? SWING_CLICK_VELOCITY : -SWING_CLICK_VELOCITY;
+    player.p.yVelocity = player.p.gravityFlipped ? -10.5 : 10.5;
     player.p.onGround = false;
     player.p.canJump = false;
     player.p.isJumping = false;
-    player.p.upKeyPressed = true;
+    player.p.upKeyPressed = false;
+    player.p.queuedHold = false;
     player.p._orbActivationConsumedForPress = true;
   }
 
@@ -134,7 +130,7 @@
           const nearby = this._gameLayer.getNearbySectionObjects(pieceWidth) || [];
           for (const obj of nearby) {
             const type = String(obj?.type || "").toLowerCase();
-            const id = Number(obj?.id ?? obj?.objectId ?? obj?.objId);
+            const id = Number(obj?.id ?? obj?.objectId ?? obj?.objId ?? obj?.objid);
             if (type === "portal_swing" || type === "swing_portal" || id === SWING_PORTAL_ID) {
               const half = this.p.isMini ? 18 : 30;
               const dx = pieceWidth - Number(obj.x || 0);
@@ -156,8 +152,6 @@
       };
     }
 
-    // player.js has its own renderer. Re-assert Swing visibility after it runs,
-    // because the normal renderer otherwise restores the ship sprite.
     const originalSyncSprites = PlayerObject.prototype.syncSprites;
     if (typeof originalSyncSprites === "function" && !PlayerObject.prototype.__gd22SwingSyncPatched) {
       PlayerObject.prototype.__gd22SwingSyncPatched = true;
@@ -190,38 +184,6 @@
         scene.input?.keyboard?.on("keydown-SPACE", handlePress);
         scene.input?.keyboard?.on("keydown-UP", handlePress);
         scene._gd22SwingPressHandler = handlePress;
-        return result;
-      };
-    }
-
-    const originalUpdate = GameScene.prototype.update;
-    if (typeof originalUpdate === "function") {
-      GameScene.prototype.update = function(time, delta, ...args) {
-        const result = originalUpdate.call(this, time, delta, ...args);
-        const frame = Math.max(0.25, Math.min(2.5, (Number(delta) || 16.6667) / 16.6667));
-        const updateSwing = (player, state) => {
-          if (!player || !state?.isSwing || state.isDead) return;
-          state.yVelocity += (state.gravityFlipped ? -SWING_GRAVITY : SWING_GRAVITY) * frame;
-          state.yVelocity = Math.max(-SWING_MAX_VELOCITY, Math.min(SWING_MAX_VELOCITY, state.yVelocity));
-          state.y += state.yVelocity * frame;
-          const floor = this._level?.getFloorY?.() ?? this._level?._groundY ?? 0;
-          const ceiling = this._level?.getCeilingY?.() ?? this._level?._ceilingY ?? 600;
-          const size = state.isMini ? 18 : 30;
-          if (state.y < floor + size) {
-            state.y = floor + size;
-            state.yVelocity = Math.max(0, state.yVelocity);
-          }
-          if (state.y > ceiling - size) {
-            state.y = ceiling - size;
-            state.yVelocity = Math.min(0, state.yVelocity);
-          }
-          state.onGround = false;
-          state.canJump = false;
-          state.isJumping = false;
-          syncSwingSprite(player);
-        };
-        updateSwing(this._player, this._state);
-        if (this._isDual) updateSwing(this._player2, this._state2);
         return result;
       };
     }
