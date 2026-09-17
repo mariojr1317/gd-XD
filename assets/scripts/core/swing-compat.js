@@ -6,8 +6,8 @@
   const SWING_PORTAL_ID = 1933;
   const SWING_GRAVITY = 0.36;
   const SWING_MAX_VELOCITY = 13;
-  const SWING_ANIM_DISTANCE = 9;
-  const SWING_ANIM_SPEED = 7.5;
+  const SWING_ANIM_DISTANCE = 12;
+  const SWING_ANIM_DURATION = 0.18;
 
   function getSourceLevelObject(player, collider) {
     const id = collider?._eeObjectId;
@@ -67,7 +67,8 @@
     }
     player._swingSprite = player._swingBase || null;
     player._swingAnimOffset = 0;
-    player._swingAnimTime = 0;
+    player._swingAnimProgress = 1;
+    player._swingAnimActive = false;
     tintSwingLayers(player);
   }
 
@@ -82,22 +83,28 @@
   function syncSwingCeiling(player) {
     const scene = player?._scene;
     const layer = player?._gameLayer;
-    if (!scene || !layer) return;
+    if (!scene || !layer || !player?.p?.isSwing) return;
     const ceiling = Number(layer.getCeilingY?.());
     if (!Number.isFinite(ceiling)) return;
+
     if (!player._swingCeilingGuide) {
-      player._swingCeilingGuide = scene.add.graphics().setScrollFactor(0).setDepth(10);
+      player._swingCeilingGuide = scene.add.graphics();
+      player._swingCeilingGuide.setScrollFactor(0);
+      player._swingCeilingGuide.setDepth(100);
     }
+
     const cameraY = Number(scene._cameraY) || 0;
-    const screenY = b(ceiling) + cameraY;
+    const size = player.p.isMini ? 18 : 30;
+    const screenY = b(ceiling - size) + cameraY;
     const width = typeof screenWidth === 'number' ? screenWidth : 1200;
+
     player._swingCeilingGuide.clear();
-    player._swingCeilingGuide.lineStyle(4, 0xffffff, 0.35);
+    player._swingCeilingGuide.lineStyle(6, 0xffffff, 0.8);
     player._swingCeilingGuide.beginPath();
     player._swingCeilingGuide.moveTo(0, screenY);
     player._swingCeilingGuide.lineTo(width, screenY);
     player._swingCeilingGuide.strokePath();
-    player._swingCeilingGuide.setVisible(!!player.p?.isSwing);
+    player._swingCeilingGuide.setVisible(true);
   }
 
   function syncSwingSprite(player) {
@@ -109,10 +116,6 @@
       ? (typeof screenWidth === 'number' ? screenWidth - centerX : centerX)
       : centerX;
     const baseY = Number.isFinite(player._lastScreenY) ? player._lastScreenY : b(player.p.y);
-
-    // Visual Swing animation: the craft gently travels up/down around the
-    // player's center. It follows the current gravity, independently of the
-    // physics position, so the motion stays smooth and does not drift.
     const gravityDirection = player.p.gravityFlipped ? -1 : 1;
     const offset = Number(player._swingAnimOffset) || 0;
     const y = baseY + offset * gravityDirection;
@@ -132,15 +135,29 @@
     syncSwingCeiling(player);
   }
 
-  function updateSwingAnimation(player, dt) {
+  function startSwingAnimation(player) {
     if (!player?.p?.isSwing) return;
+    // Animation starts only from an actual Swing click.
+    player._swingAnimOffset = 0;
+    player._swingAnimProgress = 0;
+    player._swingAnimActive = true;
+  }
+
+  function updateSwingAnimation(player, dt) {
+    if (!player?.p?.isSwing || !player._swingAnimActive) return;
     const frame = Math.max(0, Number(dt) || 0);
-    player._swingAnimTime = (Number(player._swingAnimTime) || 0) + frame;
-    const phase = player._swingAnimTime * SWING_ANIM_SPEED;
-    const target = Math.sin(phase) * SWING_ANIM_DISTANCE;
-    const current = Number(player._swingAnimOffset) || 0;
-    const smoothing = Math.min(1, frame * 10);
-    player._swingAnimOffset = current + (target - current) * smoothing;
+    const duration = Math.max(0.001, SWING_ANIM_DURATION);
+    player._swingAnimProgress = Math.min(1, (Number(player._swingAnimProgress) || 0) + frame / duration);
+
+    // Smooth ease-out: the Swing moves vertically toward the new gravity side.
+    const t = player._swingAnimProgress;
+    const eased = 1 - Math.pow(1 - t, 3);
+    player._swingAnimOffset = eased * SWING_ANIM_DISTANCE;
+
+    if (t >= 1) {
+      player._swingAnimOffset = 0;
+      player._swingAnimActive = false;
+    }
   }
 
   function clampSwingToBounds(player) {
@@ -190,8 +207,9 @@
     player.p.upKeyPressed = false;
     player.p.queuedHold = false;
     player.p._orbActivationConsumedForPress = true;
-    player._swingAnimTime = 0;
     player._swingAnimOffset = 0;
+    player._swingAnimProgress = 1;
+    player._swingAnimActive = false;
     player.stopRotation?.();
     player._rotation = 0;
     player.setCubeVisible(false);
@@ -201,8 +219,8 @@
     player.setSpiderVisible?.(false);
     player.setRobotVisible?.(false);
     setSwingVisible(player, true);
-    syncSwingCeiling(player);
     clampSwingToBounds(player);
+    syncSwingCeiling(player);
   }
 
   function exitSwing(player) {
@@ -214,6 +232,8 @@
     player.p.isJumping = false;
     player.p.yVelocity = 0;
     player._swingAnimOffset = 0;
+    player._swingAnimProgress = 1;
+    player._swingAnimActive = false;
     setSwingVisible(player, false);
     if (player._swingCeilingGuide) player._swingCeilingGuide.setVisible(false);
     player.setCubeVisible(!player.p.isFlying && !player.p.isWave && !player.p.isUfo && !player.p.isSpider && !player.p.isRobot);
@@ -232,6 +252,7 @@
     player.p._orbActivationConsumedForPress = true;
     player.stopRotation?.();
     player._rotation = 0;
+    startSwingAnimation(player);
   }
 
   if (typeof PlayerObject !== 'undefined' && PlayerObject.prototype) {
