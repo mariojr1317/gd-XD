@@ -66,7 +66,12 @@
     player.p.canJump = false;
     player.p.isJumping = false;
 
-    player.runRotateAction();
+    // Spider Orb gravity should feel like a sharp vertical flip, not a
+    // long diagonal/smooth rotation. Snap the player to the new orientation.
+    player.stopRotation();
+    player._rotation = 0;
+    player.p.onCeiling = pointsUp;
+    player.p.onGround = !pointsUp;
     player._markActivatedOrbSprites(gameObj);
   }
 
