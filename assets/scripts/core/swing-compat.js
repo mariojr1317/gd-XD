@@ -6,16 +6,15 @@
   window.__gd22SwingCompatLoaded = true;
 
   const SWING_PORTAL_ID = 1933;
+  const SWING_GRAVITY = 1.13;
+  const SWING_CLICK_VELOCITY = 10.5;
+  const SWING_MAX_VELOCITY = 18;
 
   function setSwingVisibility(player, visible) {
     if (!player) return;
     if (!player._swingSprite) {
       const scene = player._scene;
-      const candidates = [
-        "swing_01_001.png",
-        "swing_01_2_001.png",
-        "swing_01_extra_001.png"
-      ];
+      const candidates = ["swing_01_001.png", "swing_01_2_001.png", "swing_01_extra_001.png"];
       for (const frame of candidates) {
         try {
           if (typeof addImageToScene === "function") {
@@ -51,7 +50,6 @@
     player._swingSprite.setPosition(x, y);
     player._swingSprite.setRotation(player.p.gravityFlipped ? Math.PI : 0);
     player._swingSprite.setVisible(true);
-
     player.setShipVisible(false);
     player.setCubeVisible(false);
     player.setBallVisible(false);
@@ -67,7 +65,6 @@
     player.exitBallMode?.();
     player.exitWaveMode?.();
     player.exitShipMode?.();
-
     player.p.isSwing = true;
     player.p.isFlying = false;
     player.p.isUfo = false;
@@ -78,9 +75,7 @@
     player.p.canJump = false;
     player.p.isJumping = false;
     player.p.yVelocity = 0;
-
     if (portal && Number.isFinite(portal.portalY)) player.p.y = portal.portalY;
-
     player.stopRotation?.();
     player._rotation = player.p.gravityFlipped ? Math.PI : 0;
     player.setCubeVisible(false);
@@ -108,7 +103,7 @@
   function swingClick(player) {
     if (!player?.p?.isSwing || player.p.isDead) return;
     player.p.gravityFlipped = !player.p.gravityFlipped;
-    player.p.yVelocity = player.p.gravityFlipped ? -10.5 : 10.5;
+    player.p.yVelocity = player.p.gravityFlipped ? -SWING_CLICK_VELOCITY : SWING_CLICK_VELOCITY;
     player.p.onGround = false;
     player.p.canJump = false;
     player.p.isJumping = false;
@@ -120,6 +115,30 @@
   if (typeof PlayerObject !== "undefined" && PlayerObject.prototype) {
     PlayerObject.prototype.enterSwingMode = function(portal = null) { enterSwing(this, portal); };
     PlayerObject.prototype.exitSwingMode = function() { exitSwing(this); };
+
+    /* Replace the normal cube/ship update only while Swing is active. */
+    const originalUpdateJump = PlayerObject.prototype.updateJump;
+    if (typeof originalUpdateJump === "function" && !PlayerObject.prototype.__gd22SwingPhysicsPatched) {
+      PlayerObject.prototype.__gd22SwingPhysicsPatched = true;
+      PlayerObject.prototype.updateJump = function(dt) {
+        if (!this.p?.isSwing) return originalUpdateJump.call(this, dt);
+        const frame = Math.max(0, Number(dt) || 0);
+        if (this.p.gravityFlipped) {
+          this.p.yVelocity -= SWING_GRAVITY * frame * this.flipMod();
+          this.p.yVelocity = Math.min(this.p.yVelocity, SWING_MAX_VELOCITY);
+        } else {
+          this.p.yVelocity -= SWING_GRAVITY * frame * this.flipMod();
+          this.p.yVelocity = Math.max(this.p.yVelocity, -SWING_MAX_VELOCITY);
+        }
+        this.p.onGround = false;
+        this.p.canJump = false;
+        this.p.isJumping = false;
+        if (!this.rotateActionActive) {
+          const target = this.p.gravityFlipped ? Math.PI : 0;
+          this._rotation += (target - this._rotation) * Math.min(1, frame * 0.35);
+        }
+      };
+    }
 
     const originalCheckCollisions = PlayerObject.prototype.checkCollisions;
     if (typeof originalCheckCollisions === "function" && !PlayerObject.prototype.__gd22SwingCollisionPatched) {
@@ -170,7 +189,6 @@
 
   if (typeof GameScene !== "undefined" && GameScene.prototype && !GameScene.prototype.__gd22SwingPatched) {
     GameScene.prototype.__gd22SwingPatched = true;
-
     const originalCreate = GameScene.prototype.create;
     if (typeof originalCreate === "function") {
       GameScene.prototype.create = function(...args) {
