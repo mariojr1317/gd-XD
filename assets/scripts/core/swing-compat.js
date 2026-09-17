@@ -10,15 +10,6 @@
   const SWING_CLICK_VELOCITY = 10.5;
   const SWING_MAX_VELOCITY = 18;
 
-  function isSwingDefinition(levelObj, objectDef) {
-    if (!levelObj) return false;
-    if (String(objectDef?.sub || "").toLowerCase() === "swing") return true;
-    return Number(levelObj.id) === SWING_PORTAL_ID;
-  }
-
-  // level.js stores the original level object in _resetobject using the same
-  // _eeObjectId that is copied onto its collider. This lets us identify the
-  // Swing portal even if its collider was initially classified as portal_fly.
   function getSourceLevelObject(player, collider) {
     const linkedId = collider?._eeObjectId;
     if (linkedId === undefined || linkedId === null) return null;
@@ -30,19 +21,33 @@
     if (!collider) return false;
     if (String(collider.type || "").toLowerCase() === "portal_swing") return true;
     const source = getSourceLevelObject(player, collider);
-    return Number(source?.id) === SWING_PORTAL_ID ||
-      String(source?.sub || "").toLowerCase() === "swing";
+    return Number(source?.id) === SWING_PORTAL_ID || String(source?.sub || "").toLowerCase() === "swing";
+  }
+
+  function isActuallyTouchingSwingPortal(player, collider, worldX) {
+    if (!player || !collider) return false;
+    const size = player.p?.isMini ? 18 : 30;
+    const x = Number(worldX);
+    const y = Number(player.p?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    if (typeof player._isPlayerTouchingPortalHitbox === "function") {
+      return player._isPlayerTouchingPortalHitbox(collider, x, y, size);
+    }
+    const w = Number(collider.w) || 0;
+    const h = Number(collider.h) || 0;
+    const rot = (Number(collider.rotationDegrees) || 0) * Math.PI / 180;
+    const halfW = w / 2, halfH = h / 2;
+    const rw = Math.abs(halfW * Math.cos(rot)) + Math.abs(halfH * Math.sin(rot));
+    const rh = Math.abs(halfW * Math.sin(rot)) + Math.abs(halfH * Math.cos(rot));
+    return !(x + size <= collider.x - rw) && !(x - size >= collider.x + rw) &&
+      !(y + size <= collider.y - rh) && !(y - size >= collider.y + rh);
   }
 
   function setSwingVisibility(player, visible) {
     if (!player) return;
     if (!player._swingSprite) {
       const scene = player._scene;
-      const candidates = [
-        "swing_01_001.png",
-        "swing_01_2_001.png",
-        "swing_01_extra_001.png"
-      ];
+      const candidates = ["swing_01_001.png", "swing_01_2_001.png", "swing_01_extra_001.png"];
       for (const frame of candidates) {
         try {
           if (typeof addImageToScene === "function") {
@@ -73,17 +78,17 @@
   function syncSwingSprite(player) {
     if (!player?._swingSprite || !player.p?.isSwing) return;
     const scene = player._scene;
-    const x = Number.isFinite(scene?._playerWorldX) ? scene._playerWorldX : 0;
+    const x = Number.isFinite(scene?._playerWorldX) ? scene._playerWorldX : player.p.x;
     const y = typeof b === "function" ? b(player.p.y) : player.p.y;
     player._swingSprite.setPosition(x, y);
     player._swingSprite.setRotation(player.p.gravityFlipped ? Math.PI : 0);
     player._swingSprite.setVisible(true);
     player.setShipVisible(false);
     player.setCubeVisible(false);
-    player.setBallVisible(false);
-    player.setWaveVisible(false);
-    player.setSpiderVisible(false);
-    player.setRobotVisible(false);
+    player.setBallVisible?.(false);
+    player.setWaveVisible?.(false);
+    player.setSpiderVisible?.(false);
+    player.setRobotVisible?.(false);
   }
 
   function enterSwing(player, portal = null) {
@@ -94,7 +99,6 @@
     player.exitWaveMode?.();
     player.exitShipMode?.();
     player.exitUfoMode?.();
-
     player.p.isSwing = true;
     player.p.isFlying = false;
     player.p.isUfo = false;
@@ -108,22 +112,19 @@
     player.p.yVelocity = 0;
     player.p.upKeyPressed = false;
     player.p.queuedHold = false;
-
     if (portal) {
       const portalY = Number(portal.portalY ?? portal.y);
       if (Number.isFinite(portalY)) player.p.y = portalY;
     }
-
     player.stopRotation?.();
     player._rotation = player.p.gravityFlipped ? Math.PI : 0;
     player.setCubeVisible(false);
     player.setShipVisible(false);
-    player.setBallVisible(false);
-    player.setWaveVisible(false);
-    player.setSpiderVisible(false);
-    player.setRobotVisible(false);
+    player.setBallVisible?.(false);
+    player.setWaveVisible?.(false);
+    player.setSpiderVisible?.(false);
+    player.setRobotVisible?.(false);
     setSwingVisibility(player, true);
-    player._setGamemodeFlyBounds?.(true, player.p.y, 30, false);
   }
 
   function exitSwing(player) {
@@ -135,7 +136,6 @@
     player.p.yVelocity = 0;
     setSwingVisibility(player, false);
     player.setCubeVisible(!player.p.isBall && !player.p.isFlying && !player.p.isWave && !player.p.isUfo && !player.p.isSpider && !player.p.isRobot);
-    player._setGamemodeFlyBounds?.(false, 0);
   }
 
   function swingClick(player) {
@@ -175,19 +175,14 @@
       PlayerObject.prototype.updateJump = function(dt) {
         if (!this.p?.isSwing) return originalUpdateJump.call(this, dt);
         const frame = Math.max(0, Number(dt) || 0);
-
-        // Dedicated Swing gravity. It never enters Ship's fly physics.
         const gravitySign = this.p.gravityFlipped ? -1 : 1;
         this.p.yVelocity += SWING_GRAVITY * frame * gravitySign;
         this.p.yVelocity = Math.max(-SWING_MAX_VELOCITY, Math.min(SWING_MAX_VELOCITY, this.p.yVelocity));
         this.p.onGround = false;
         this.p.canJump = false;
         this.p.isJumping = false;
-
         const target = this.p.gravityFlipped ? Math.PI : 0;
-        if (!this.rotateActionActive) {
-          this._rotation += (target - this._rotation) * Math.min(1, frame * 0.35);
-        }
+        if (!this.rotateActionActive) this._rotation += (target - this._rotation) * Math.min(1, frame * 0.35);
       };
     }
 
@@ -196,18 +191,14 @@
       PlayerObject.prototype.__gd22SwingCollisionPatched = true;
       PlayerObject.prototype.checkCollisions = function(...args) {
         if (!this.p?.isDead && !this.p?.ignorePortals && this._gameLayer?.getNearbySectionObjects) {
-          const pieceWidth = (Number(args[0]) || 0) + (typeof centerX === "number" ? centerX : 0);
+          const pieceWidth = Number(args[0]);
           const nearby = this._gameLayer.getNearbySectionObjects(pieceWidth) || [];
           for (const obj of nearby) {
             if (!isSwingCollider(this, obj)) continue;
-
-            // Convert the live collider before native collision code reads
-            // gameObj.type. This is the important part that prevents the
-            // existing portal_fly branch from turning Swing into Ship.
+            if (!isActuallyTouchingSwingPortal(this, obj, pieceWidth)) continue;
             obj.type = "portal_swing";
             obj.swingPortal = true;
             obj.swingPortalId = SWING_PORTAL_ID;
-
             if (!this._isObjectActivated?.(obj)) {
               this._setObjectActivated?.(obj, true);
               this._playPortalShine?.(obj);
@@ -228,9 +219,7 @@
         if (this.p?.isSwing) {
           setSwingVisibility(this, true);
           syncSwingSprite(this);
-        } else if (this._swingSprite) {
-          this._swingSprite.setVisible(false);
-        }
+        } else if (this._swingSprite) this._swingSprite.setVisible(false);
         return result;
       };
     }
