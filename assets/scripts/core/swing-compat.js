@@ -6,9 +6,10 @@
   window.__gd22SwingCompatLoaded = true;
 
   const SWING_PORTAL_ID = 1933;
-  // Swing should fall more gently than the current Ball-style acceleration.
-  const SWING_GRAVITY = 0.68;
-  const SWING_CLICK_VELOCITY = 10.5;
+  // Swing uses the same gravity scale as the local Ball implementation,
+  // rather than a separate acceleration that can become too fast.
+  const SWING_GRAVITY_SCALE = 0.6;
+  const SWING_CLICK_VELOCITY = 8.5;
   const SWING_MAX_VELOCITY = 16;
 
   function getSourceLevelObject(player, collider) {
@@ -78,11 +79,16 @@
 
   function syncSwingSprite(player) {
     if (!player?._swingSprite || !player.p?.isSwing) return;
-    // Use the exact screen coordinates calculated by native syncSprites.
-    // The previous implementation used world X, which made the Swing icon
-    // drift away from the camera and eventually leave the screen.
-    const x = Number.isFinite(player._lastScreenX) ? player._lastScreenX : centerX;
-    const y = Number.isFinite(player._lastScreenY) ? player._lastScreenY : b(player.p.y) + (player._scene?._cameraY || 0);
+
+    // Use exactly the same screen-space conversion as drawHitboxes/native
+    // player rendering. Do not use _lastScreenX/Y because those are not the
+    // authoritative position of this compatibility sprite.
+    const scene = player._scene;
+    const camY = Number(scene?._cameraY) || 0;
+    const mirrored = !!player.p.mirrored;
+    const x = mirrored ? screenWidth - centerX : centerX;
+    const y = b(player.p.y) + camY;
+
     player._swingSprite.setPosition(x, y);
     player._swingSprite.setRotation(player.p.gravityFlipped ? Math.PI : 0);
     player._swingSprite.setVisible(true);
@@ -119,7 +125,6 @@
     if (!player?.p || player.p.isSwing) return;
 
     // Keep the gravity the player already has when entering the portal.
-    // Normal gravity stays normal; inverted gravity stays inverted.
     const entryGravityFlipped = !!player.p.gravityFlipped;
 
     player.exitSpiderMode?.();
@@ -143,12 +148,9 @@
     player.p.upKeyPressed = false;
     player.p.queuedHold = false;
 
-    // Some exit-mode methods can normalize their own state. Restore the
-    // gravity that was active immediately before entering Swing.
+    // Exit methods must not change the gravity with which Swing was entered.
     player.p.gravityFlipped = entryGravityFlipped;
 
-    // Do NOT move the player to the portal center. Swing starts exactly at
-    // the player's current position, like the other gravity-based modes.
     player.stopRotation?.();
     player._rotation = player.p.gravityFlipped ? Math.PI : 0;
     player.setCubeVisible(false);
@@ -208,14 +210,20 @@
       PlayerObject.prototype.__gd22SwingPhysicsPatched = true;
       PlayerObject.prototype.updateJump = function(dt) {
         if (!this.p?.isSwing) return originalUpdateJump.call(this, dt);
+
         const frame = Math.max(0, Number(dt) || 0);
+        const gravityBase = typeof p === "number" ? p : 1;
+        const gravity = gravityBase * SWING_GRAVITY_SCALE;
         const gravitySign = this.p.gravityFlipped ? -1 : 1;
-        this.p.yVelocity += SWING_GRAVITY * frame * gravitySign;
+
+        // Match the Ball's gravity convention and time scaling.
+        this.p.yVelocity -= gravity * frame * gravitySign;
         this.p.yVelocity = Math.max(-SWING_MAX_VELOCITY, Math.min(SWING_MAX_VELOCITY, this.p.yVelocity));
         this.p.onGround = false;
         this.p.canJump = false;
         this.p.isJumping = false;
         clampSwingToLevelBounds(this);
+
         const target = this.p.gravityFlipped ? Math.PI : 0;
         if (!this.rotateActionActive) this._rotation += (target - this._rotation) * Math.min(1, frame * 0.35);
       };
