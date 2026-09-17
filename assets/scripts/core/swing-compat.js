@@ -116,6 +116,21 @@
     PlayerObject.prototype.enterSwingMode = function(portal = null) { enterSwing(this, portal); };
     PlayerObject.prototype.exitSwingMode = function() { exitSwing(this); };
 
+    // The normal portal code can see the Swing portal as portal_fly afterwards.
+    // While Swing is active, block that fallback from switching the player to Ship.
+    const originalEnterShipMode = PlayerObject.prototype.enterShipMode;
+    if (typeof originalEnterShipMode === "function" && !PlayerObject.prototype.__gd22SwingShipGuardPatched) {
+      PlayerObject.prototype.__gd22SwingShipGuardPatched = true;
+      PlayerObject.prototype.enterShipMode = function(...args) {
+        if (this.p?.isSwing) {
+          this.p.isFlying = false;
+          this.setShipVisible(false);
+          return;
+        }
+        return originalEnterShipMode.apply(this, args);
+      };
+    }
+
     const originalUpdateJump = PlayerObject.prototype.updateJump;
     if (typeof originalUpdateJump === "function" && !PlayerObject.prototype.__gd22SwingPhysicsPatched) {
       PlayerObject.prototype.__gd22SwingPhysicsPatched = true;
@@ -160,8 +175,6 @@
                   this._playPortalShine?.(obj);
                   enterSwing(this, obj);
                 }
-                /* The original collision pass may classify the same object as
-                 * a ship/fly portal. Do not run it again after Swing activates. */
                 return true;
               }
             }
