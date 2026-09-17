@@ -12,6 +12,13 @@
 
   const SPIDER_ORB_OBJECT_ID = 3004;
 
+  function getSourceLevelObject(player, collider) {
+    const linkedId = collider?._eeObjectId;
+    if (linkedId === undefined || linkedId === null) return null;
+    const layer = player?._gameLayer;
+    return layer?._resetobject?.[linkedId] || layer?._resetObject?.[linkedId] || null;
+  }
+
   function isSpiderOrbObject(obj) {
     if (!obj) return false;
     if (Number(obj.orbId) === SPIDER_ORB_OBJECT_ID) return true;
@@ -20,10 +27,23 @@
     return frame.includes('spiderring');
   }
 
-  function arrowPointsUp(gameObj) {
-    const rotation = Number(gameObj?.orbRotation ?? gameObj?.rotation ?? 0) || 0;
-    const rad = rotation * Math.PI / 180;
-    return (-Math.cos(rad)) < 0;
+  function arrowPointsUp(player, gameObj) {
+    // The important value is the level object's rotation. Prefer the original
+    // level object when available, then fall back to the collider rotation.
+    // 0 degrees is the normal UP-facing Spider Orb; 180 degrees is DOWN.
+    const source = getSourceLevelObject(player, gameObj);
+    let rotation = Number(source?.rot);
+    if (!Number.isFinite(rotation)) rotation = Number(gameObj?.orbRotation);
+    if (!Number.isFinite(rotation)) rotation = Number(gameObj?.rotationDegrees);
+    if (!Number.isFinite(rotation)) rotation = Number(gameObj?.rotation);
+    if (!Number.isFinite(rotation)) rotation = 0;
+
+    rotation = ((rotation % 360) + 360) % 360;
+    let pointsUp = rotation < 90 || rotation >= 270;
+
+    // Vertical flip reverses the arrow direction. Horizontal flip does not.
+    if (source?.flipY) pointsUp = !pointsUp;
+    return pointsUp;
   }
 
   function activateSpiderOrb(player, gameObj) {
@@ -31,13 +51,12 @@
     if (player._isObjectActivated(gameObj)) return false;
 
     const playerSize = player.p.isMini ? 18 : 30;
-    const pointsUp = arrowPointsUp(gameObj);
+    const pointsUp = arrowPointsUp(player, gameObj);
     const floorY = Number(player._gameLayer?.getFloorY?.());
     const ceilingY = Number(player._gameLayer?.getCeilingY?.());
 
-    // IMPORTANT: do not replace orbId with 444 here. Every collider must keep
-    // its original object ID (3004), otherwise multiple Spider Orbs can become
-    // indistinguishable to later collision processing.
+    // Keep the original object ID on every collider so separate Spider Orbs
+    // never become the same object internally.
     player._setObjectActivated(gameObj, true);
     player._orbpadHitEffect(gameObj, true);
     player._consumeOrbActivationInput();
@@ -48,7 +67,7 @@
       player.p.y = floorY + playerSize;
     }
 
-    // This particular orb decides the destination and resulting gravity.
+    // The arrow decides the resulting gravity.
     player.flipGravity(pointsUp, 1.0);
     player._syncOtherDualGravityForBlueBoost();
     player.playGravityEffect(pointsUp);
@@ -76,27 +95,20 @@
     if (!this.p?.isDead && !this.p?.ignorePortals && this._gameLayer?.getNearbySectionObjects) {
       const pieceWidth = (Number(args[0]) || 0) + (typeof centerX === 'number' ? centerX : 0);
       const nearby = this._gameLayer.getNearbySectionObjects(pieceWidth) || [];
-
-      // Only one orb can consume a single press. Pick the first Spider Orb
-      // that is actually in range; the next orb remains independent and can
-      // be activated on a later press.
       const justPressed = this.p.upKeyDown && !this.p.wasUpKeyDown;
       const needsClick = justPressed || (this.p.queuedHold && this.p.upKeyDown);
 
       if (needsClick) {
         for (const gameObj of nearby) {
           if (!isSpiderOrbObject(gameObj)) continue;
-          if (typeof this._isPlayerTouchingPortalHitbox === 'function') {
-            // Orb colliders are still regular jump-ring colliders. Use their
-            // own bounds instead of treating every nearby Spider Orb as hit.
-            const size = this.p.isMini ? 18 : 30;
-            const left = gameObj.x - gameObj.w / 2;
-            const right = gameObj.x + gameObj.w / 2;
-            const top = gameObj.y - gameObj.h / 2;
-            const bottom = gameObj.y + gameObj.h / 2;
-            const touching = !(pieceWidth + size <= left || pieceWidth - size >= right || this.p.y + size <= top || this.p.y - size >= bottom);
-            if (!touching) continue;
-          }
+
+          const size = this.p.isMini ? 18 : 30;
+          const left = gameObj.x - gameObj.w / 2;
+          const right = gameObj.x + gameObj.w / 2;
+          const top = gameObj.y - gameObj.h / 2;
+          const bottom = gameObj.y + gameObj.h / 2;
+          const touching = !(pieceWidth + size <= left || pieceWidth - size >= right || this.p.y + size <= top || this.p.y - size >= bottom);
+          if (!touching) continue;
 
           if (activateSpiderOrb(this, gameObj)) {
             activatedSpiderOrb = true;
@@ -106,9 +118,7 @@
       }
     }
 
-    // The native orb handler does not know object 3004, so it is safe to run
-    // for other objects. If this frame activated a Spider Orb, skip the native
-    // collision pass so that the same press cannot trigger another orb.
+    // A Spider Orb consumes this press before native orb handling can run.
     if (activatedSpiderOrb) return;
     return originalCheckCollisions.apply(this, args);
   };
