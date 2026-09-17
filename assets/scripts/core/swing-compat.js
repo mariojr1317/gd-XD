@@ -78,7 +78,9 @@
   function syncSwingSprite(player) {
     if (!player?._swingSprite || !player.p?.isSwing) return;
     const scene = player._scene;
-    const x = Number.isFinite(scene?._playerWorldX) ? scene._playerWorldX : player.p.x;
+    const x = Number.isFinite(scene?._playerWorldX)
+      ? scene._playerWorldX
+      : (typeof centerX === "number" ? centerX + Number(player.p.x || 0) : Number(player.p.x || 0));
     const y = typeof b === "function" ? b(player.p.y) : player.p.y;
     player._swingSprite.setPosition(x, y);
     player._swingSprite.setRotation(player.p.gravityFlipped ? Math.PI : 0);
@@ -91,14 +93,41 @@
     player.setRobotVisible?.(false);
   }
 
+  function clampSwingToLevelBounds(player) {
+    if (!player?.p?.isSwing) return;
+    const layer = player._gameLayer;
+    const floorY = Number(layer?.getFloorY?.());
+    const ceilingY = Number(layer?.getCeilingY?.());
+    if (!Number.isFinite(floorY) || !Number.isFinite(ceilingY)) return;
+
+    const size = player.p.isMini ? 18 : 30;
+    const minY = floorY + size;
+    const maxY = ceilingY - size;
+    if (minY > maxY) return;
+
+    if (player.p.y < minY) {
+      player.p.y = minY;
+      if (player.p.yVelocity < 0) player.p.yVelocity = 0;
+    } else if (player.p.y > maxY) {
+      player.p.y = maxY;
+      if (player.p.yVelocity > 0) player.p.yVelocity = 0;
+    }
+  }
+
   function enterSwing(player, portal = null) {
     if (!player?.p || player.p.isSwing) return;
+
+    // Keep the gravity the player already has when entering the portal.
+    // Normal gravity stays normal; inverted gravity stays inverted.
+    const entryGravityFlipped = !!player.p.gravityFlipped;
+
     player.exitSpiderMode?.();
     player.exitRobotMode?.();
     player.exitBallMode?.();
     player.exitWaveMode?.();
     player.exitShipMode?.();
     player.exitUfoMode?.();
+
     player.p.isSwing = true;
     player.p.isFlying = false;
     player.p.isUfo = false;
@@ -112,10 +141,13 @@
     player.p.yVelocity = 0;
     player.p.upKeyPressed = false;
     player.p.queuedHold = false;
-    if (portal) {
-      const portalY = Number(portal.portalY ?? portal.y);
-      if (Number.isFinite(portalY)) player.p.y = portalY;
-    }
+
+    // Some exit-mode methods can normalize their own state. Restore the
+    // gravity that was active immediately before entering Swing.
+    player.p.gravityFlipped = entryGravityFlipped;
+
+    // Do NOT move the player to the portal center. Swing starts exactly at
+    // the player's current position, like the other gravity-based modes.
     player.stopRotation?.();
     player._rotation = player.p.gravityFlipped ? Math.PI : 0;
     player.setCubeVisible(false);
@@ -125,6 +157,7 @@
     player.setSpiderVisible?.(false);
     player.setRobotVisible?.(false);
     setSwingVisibility(player, true);
+    clampSwingToLevelBounds(player);
   }
 
   function exitSwing(player) {
@@ -181,6 +214,7 @@
         this.p.onGround = false;
         this.p.canJump = false;
         this.p.isJumping = false;
+        clampSwingToLevelBounds(this);
         const target = this.p.gravityFlipped ? Math.PI : 0;
         if (!this.rotateActionActive) this._rotation += (target - this._rotation) * Math.min(1, frame * 0.35);
       };
@@ -191,7 +225,7 @@
       PlayerObject.prototype.__gd22SwingCollisionPatched = true;
       PlayerObject.prototype.checkCollisions = function(...args) {
         if (!this.p?.isDead && !this.p?.ignorePortals && this._gameLayer?.getNearbySectionObjects) {
-          const pieceWidth = Number(args[0]);
+          const pieceWidth = Number(args[0]) + (typeof centerX === "number" ? centerX : 0);
           const nearby = this._gameLayer.getNearbySectionObjects(pieceWidth) || [];
           for (const obj of nearby) {
             if (!isSwingCollider(this, obj)) continue;
