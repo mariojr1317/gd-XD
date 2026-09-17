@@ -6,9 +6,10 @@
   window.__gd22SwingCompatLoaded = true;
 
   const SWING_PORTAL_ID = 1933;
-  const SWING_GRAVITY = 1.13;
+  // Swing should fall more gently than the current Ball-style acceleration.
+  const SWING_GRAVITY = 0.68;
   const SWING_CLICK_VELOCITY = 10.5;
-  const SWING_MAX_VELOCITY = 18;
+  const SWING_MAX_VELOCITY = 16;
 
   function getSourceLevelObject(player, collider) {
     const linkedId = collider?._eeObjectId;
@@ -77,11 +78,11 @@
 
   function syncSwingSprite(player) {
     if (!player?._swingSprite || !player.p?.isSwing) return;
-    const scene = player._scene;
-    const x = Number.isFinite(scene?._playerWorldX)
-      ? scene._playerWorldX
-      : (typeof centerX === "number" ? centerX + Number(player.p.x || 0) : Number(player.p.x || 0));
-    const y = typeof b === "function" ? b(player.p.y) : player.p.y;
+    // Use the exact screen coordinates calculated by native syncSprites.
+    // The previous implementation used world X, which made the Swing icon
+    // drift away from the camera and eventually leave the screen.
+    const x = Number.isFinite(player._lastScreenX) ? player._lastScreenX : centerX;
+    const y = Number.isFinite(player._lastScreenY) ? player._lastScreenY : b(player.p.y) + (player._scene?._cameraY || 0);
     player._swingSprite.setPosition(x, y);
     player._swingSprite.setRotation(player.p.gravityFlipped ? Math.PI : 0);
     player._swingSprite.setVisible(true);
