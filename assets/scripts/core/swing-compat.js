@@ -21,6 +21,16 @@
       ];
       for (const frame of candidates) {
         try {
+          // Use the same atlas resolver used by the rest of Web Dashers.
+          if (typeof addImageToScene === "function") {
+            const sprite = addImageToScene(scene, 0, 0, frame);
+            if (sprite) {
+              player._swingSprite = sprite;
+              player._swingSprite.setOrigin(0.5, 0.5);
+              player._swingSprite.setDepth(12);
+              break;
+            }
+          }
           const info = typeof getAtlasFrame === "function" ? getAtlasFrame(scene, frame) : null;
           if (info) {
             player._swingSprite = scene.add.image(0, 0, info.atlas, info.frame);
@@ -44,6 +54,15 @@
     const y = typeof b === "function" ? b(player.p.y) : player.p.y;
     player._swingSprite.setPosition(x, y);
     player._swingSprite.setRotation(player.p.gravityFlipped ? Math.PI : 0);
+    player._swingSprite.setVisible(true);
+
+    // Swing must never leave the ship visible while this mode is active.
+    player.setShipVisible(false);
+    player.setCubeVisible(false);
+    player.setBallVisible(false);
+    player.setWaveVisible(false);
+    player.setSpiderVisible(false);
+    player.setRobotVisible(false);
   }
 
   function enterSwing(player, portal = null) {
@@ -134,6 +153,23 @@
           }
         }
         return originalCheckCollisions.apply(this, args);
+      };
+    }
+
+    // player.js has its own renderer. Re-assert Swing visibility after it runs,
+    // because the normal renderer otherwise restores the ship sprite.
+    const originalSyncSprites = PlayerObject.prototype.syncSprites;
+    if (typeof originalSyncSprites === "function" && !PlayerObject.prototype.__gd22SwingSyncPatched) {
+      PlayerObject.prototype.__gd22SwingSyncPatched = true;
+      PlayerObject.prototype.syncSprites = function(...args) {
+        const result = originalSyncSprites.apply(this, args);
+        if (this.p?.isSwing) {
+          setSwingVisibility(this, true);
+          syncSwingSprite(this);
+        } else if (this._swingSprite) {
+          this._swingSprite.setVisible(false);
+        }
+        return result;
       };
     }
   }
