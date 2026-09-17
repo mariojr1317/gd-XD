@@ -80,7 +80,7 @@
     if (player._swingSprite) player._swingSprite.setScale(player.p?.isMini ? 0.6 : 1);
   }
 
-  function syncSwingCeiling(player) {
+  function syncSwingCeiling(player, cameraYOverride) {
     const scene = player?._scene;
     const layer = player?._gameLayer;
     if (!scene || !layer || !player?.p?.isSwing) return;
@@ -90,16 +90,20 @@
     if (!player._swingCeilingGuide) {
       player._swingCeilingGuide = scene.add.graphics();
       player._swingCeilingGuide.setScrollFactor(0);
-      player._swingCeilingGuide.setDepth(100);
+      player._swingCeilingGuide.setDepth(1000);
     }
 
-    const cameraY = Number(scene._cameraY) || 0;
+    // Use the same camera Y that native syncSprites uses. This keeps the
+    // visible Swing ceiling in exactly the same coordinate system as the player.
+    const cameraY = Number.isFinite(Number(cameraYOverride))
+      ? Number(cameraYOverride)
+      : (Number(scene._cameraY) || 0);
     const size = player.p.isMini ? 18 : 30;
     const screenY = b(ceiling - size) + cameraY;
-    const width = typeof screenWidth === 'number' ? screenWidth : 1200;
+    const width = Number(scene.scale?.width) || (typeof screenWidth === 'number' ? screenWidth : 1200);
 
     player._swingCeilingGuide.clear();
-    player._swingCeilingGuide.lineStyle(6, 0xffffff, 0.8);
+    player._swingCeilingGuide.lineStyle(8, 0xffffff, 0.95);
     player._swingCeilingGuide.beginPath();
     player._swingCeilingGuide.moveTo(0, screenY);
     player._swingCeilingGuide.lineTo(width, screenY);
@@ -112,9 +116,8 @@
     makeSwingSprite(player);
     if (!player._swingBase) return;
 
-    const x = player.p.mirrored
-      ? (typeof screenWidth === 'number' ? screenWidth - centerX : centerX)
-      : centerX;
+    // Native syncSprites already calculates the exact screen position.
+    const x = Number.isFinite(player._lastScreenX) ? player._lastScreenX : centerX;
     const baseY = Number.isFinite(player._lastScreenY) ? player._lastScreenY : b(player.p.y);
     const gravityDirection = player.p.gravityFlipped ? -1 : 1;
     const offset = Number(player._swingAnimOffset) || 0;
@@ -137,7 +140,7 @@
 
   function startSwingAnimation(player) {
     if (!player?.p?.isSwing) return;
-    // Animation starts only from an actual Swing click.
+    // One animation per jump/click action. Holding a key does not restart it.
     player._swingAnimOffset = 0;
     player._swingAnimProgress = 0;
     player._swingAnimActive = true;
@@ -149,7 +152,6 @@
     const duration = Math.max(0.001, SWING_ANIM_DURATION);
     player._swingAnimProgress = Math.min(1, (Number(player._swingAnimProgress) || 0) + frame / duration);
 
-    // Smooth ease-out: the Swing moves vertically toward the new gravity side.
     const t = player._swingAnimProgress;
     const eased = 1 - Math.pow(1 - t, 3);
     player._swingAnimOffset = eased * SWING_ANIM_DISTANCE;
@@ -348,7 +350,7 @@
         if (this.p?.isSwing) {
           setSwingVisible(this, true);
           syncSwingSprite(this);
-          syncSwingCeiling(this);
+          syncSwingCeiling(this, args[1]);
           this.setCubeVisible(false);
           this.setShipVisible(false);
           this.setBallVisible?.(false);
@@ -371,13 +373,33 @@
       GameScene.prototype.create = function(...args) {
         const result = originalCreate.apply(this, args);
         const scene = this;
-        const handlePress = () => {
+        let pointerHeld = false;
+
+        const handlePointerDown = () => {
+          if (pointerHeld) return;
+          pointerHeld = true;
           if (scene._player?.p?.isSwing) swingClick(scene._player);
           if (scene._player2?.p?.isSwing) swingClick(scene._player2);
         };
-        scene.input?.on('pointerdown', handlePress);
-        scene.input?.keyboard?.on('keydown-SPACE', handlePress);
-        scene.input?.keyboard?.on('keydown-UP', handlePress);
+        const handlePointerUp = () => { pointerHeld = false; };
+
+        // Mouse click and touchscreen/touch controls use the same one-click action.
+        scene.input?.on('pointerdown', handlePointerDown);
+        scene.input?.on('pointerup', handlePointerUp);
+        scene.input?.on('pointerout', handlePointerUp);
+        scene.input?.on('pointercancel', handlePointerUp);
+
+        // Keyboard jump controls: one Swing flip per physical key press.
+        const handleKeyDown = event => {
+          if (!event || event.repeat) return;
+          const code = event.code || event.key;
+          if (code !== 'Space' && code !== 'ArrowUp' && code !== 'UP' && code !== ' ') return;
+          if (scene._player?.p?.isSwing) swingClick(scene._player);
+          if (scene._player2?.p?.isSwing) swingClick(scene._player2);
+        };
+        scene.input?.keyboard?.on('keydown', handleKeyDown);
+        scene.input?.keyboard?.on('keydown-SPACE', handleKeyDown);
+        scene.input?.keyboard?.on('keydown-UP', handleKeyDown);
         return result;
       };
     }
