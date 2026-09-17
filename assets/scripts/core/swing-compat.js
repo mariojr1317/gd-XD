@@ -4,15 +4,14 @@
   window.__gd22SwingCompatLoaded = true;
 
   const SWING_PORTAL_ID = 1933;
-  const SWING_GRAVITY_SCALE = 0.36;
-  const SWING_CLICK_VELOCITY = 7.5;
+  const SWING_GRAVITY = 0.36;
   const SWING_MAX_VELOCITY = 13;
 
   function getSourceLevelObject(player, collider) {
-    const linkedId = collider?._eeObjectId;
-    if (linkedId === undefined || linkedId === null) return null;
+    const id = collider?._eeObjectId;
+    if (id === undefined || id === null) return null;
     const layer = player?._gameLayer;
-    return layer?._resetobject?.[linkedId] || layer?._resetObject?.[linkedId] || null;
+    return layer?._resetobject?.[id] || layer?._resetObject?.[id] || null;
   }
 
   function isSwingCollider(player, collider) {
@@ -22,75 +21,117 @@
     return Number(source?.id) === SWING_PORTAL_ID || String(source?.sub || '').toLowerCase() === 'swing';
   }
 
-  function isActuallyTouchingSwingPortal(player, collider, worldX) {
+  function touchesPortal(player, collider, worldX) {
     const size = player.p?.isMini ? 18 : 30;
-    const x = Number(worldX), y = Number(player.p?.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-    if (typeof player._isPlayerTouchingPortalHitbox === 'function') {
-      return player._isPlayerTouchingPortalHitbox(collider, x, y, size);
-    }
-    return false;
+    if (!Number.isFinite(Number(worldX)) || !Number.isFinite(Number(player.p?.y))) return false;
+    return typeof player._isPlayerTouchingPortalHitbox === 'function'
+      ? player._isPlayerTouchingPortalHitbox(collider, Number(worldX), Number(player.p.y), size)
+      : false;
   }
 
-  function setSwingVisibility(player, visible) {
-    if (!player) return;
-    if (!player._swingSprite) {
-      const scene = player._scene;
-      const frames = ['swing_01_001.png', 'swing_01_2_001.png', 'swing_01_extra_001.png'];
-      for (const frame of frames) {
-        try {
-          if (typeof addImageToScene === 'function') {
-            const sprite = addImageToScene(scene, 0, 0, frame);
-            if (sprite) {
-              player._swingSprite = sprite;
-              sprite.setOrigin(0.5, 0.5);
-              sprite.setDepth(12);
-              break;
-            }
-          }
-        } catch (_) {}
-      }
-    }
-    if (player._swingSprite) {
-      player._swingSprite.setVisible(!!visible);
-      player._swingSprite.setScale(player.p?.isMini ? 0.6 : 1);
-    }
+  function tintSwingLayers(player) {
+    const primary = Number(window.mainColor) || 0xffffff;
+    const secondary = Number(window.secondaryColor) || 0xffffff;
+    if (player._swingBase?.setTint) player._swingBase.setTint(primary);
+    if (player._swingOverlay?.setTint) player._swingOverlay.setTint(secondary);
+    if (player._swingExtra?.setTint) player._swingExtra.setTint(primary);
+    if (player._swingGlow?.setTint) player._swingGlow.setTint(secondary);
+    if (player._swingSprite?.setTint) player._swingSprite.setTint(primary);
   }
 
-  function syncSwingSprite(player) {
-    if (!player?._swingSprite || !player.p?.isSwing) return;
-    // Swing must follow the same screen anchor as the normal player icon.
-    const x = Number.isFinite(player._lastScreenX) ? player._lastScreenX : centerX;
-    const y = Number.isFinite(player._lastScreenY) ? player._lastScreenY : b(player.p.y);
-    player._swingSprite.setPosition(x, y);
-    player._swingSprite.setRotation(player.p.gravityFlipped ? Math.PI : 0);
-    player._swingSprite.setVisible(true);
+  function makeSwingSprite(player) {
+    if (player._swingSprite || !player._scene) return;
+    const scene = player._scene;
+    const candidates = [
+      ['swing_01_001.png', 'base'],
+      ['swing_01_2_001.png', 'overlay'],
+      ['swing_01_extra_001.png', 'extra'],
+      ['swing_01_glow_001.png', 'glow']
+    ];
+    for (const [frame, kind] of candidates) {
+      try {
+        if (typeof getAtlasFrame !== 'function') continue;
+        const data = getAtlasFrame(scene, frame);
+        if (!data) continue;
+        const spr = scene.add.image(0, 0, data.atlas, data.frame);
+        spr.setOrigin(0.5, 0.5);
+        spr.setDepth(kind === 'glow' ? 11.9 : kind === 'overlay' ? 12.1 : 12);
+        spr.setVisible(false);
+        if (kind === 'base') player._swingBase = spr;
+        else if (kind === 'overlay') player._swingOverlay = spr;
+        else if (kind === 'extra') player._swingExtra = spr;
+        else if (kind === 'glow') player._swingGlow = spr;
+      } catch (_) {}
+    }
+    player._swingSprite = player._swingBase || null;
+    tintSwingLayers(player);
   }
 
-  function clampSwingToLevelBounds(player) {
+  function setSwingVisible(player, visible) {
+    makeSwingSprite(player);
+    const layers = [player._swingGlow, player._swingBase, player._swingOverlay, player._swingExtra];
+    for (const spr of layers) if (spr) spr.setVisible(!!visible);
+    if (visible) tintSwingLayers(player);
+    if (player._swingSprite) player._swingSprite.setScale(player.p?.isMini ? 0.6 : 1);
+  }
+
+  function syncSwingSprite(player, dt = 0) {
     if (!player?.p?.isSwing) return;
-    const floorY = Number(player._gameLayer?.getFloorY?.());
-    const ceilingY = Number(player._gameLayer?.getCeilingY?.());
-    if (!Number.isFinite(floorY) || !Number.isFinite(ceilingY)) return;
+    makeSwingSprite(player);
+    if (!player._swingBase) return;
+
+    // The Swing stays on the player's horizontal screen anchor. It must not
+    // use world X or an animated X offset, which caused the icon to drift away.
+    const x = player.p.mirrored
+      ? (typeof screenWidth === 'number' ? screenWidth - centerX : centerX)
+      : centerX;
+    const y = Number.isFinite(player._lastScreenY) ? player._lastScreenY : b(player.p.y);
+    const mini = player.p.isMini ? 0.6 : 1;
+
+    // Swing points in the direction of gravity. Do not rotate it 180 degrees:
+    // the atlas artwork itself contains the correct orientation.
+    const rotation = 0;
+    const layers = [player._swingGlow, player._swingBase, player._swingOverlay, player._swingExtra];
+    for (const spr of layers) {
+      if (!spr) continue;
+      spr.x = x;
+      spr.y = y;
+      spr.rotation = rotation;
+      spr.scaleX = player.p.mirrored ? -mini : mini;
+      spr.scaleY = mini;
+      spr.setVisible(true);
+    }
+    tintSwingLayers(player);
+  }
+
+  function clampSwingToBounds(player) {
+    if (!player?.p?.isSwing) return;
+    const floor = Number(player._gameLayer?.getFloorY?.());
+    const ceiling = Number(player._gameLayer?.getCeilingY?.());
+    if (!Number.isFinite(floor) || !Number.isFinite(ceiling)) return;
     const size = player.p.isMini ? 18 : 30;
-    const minY = floorY + size;
-    const maxY = ceilingY - size;
+    const minY = floor + size;
+    const maxY = ceiling - size;
     if (minY > maxY) return;
+
     if (player.p.y < minY) {
       player.p.y = minY;
-      player.p.yVelocity = Math.max(0, player.p.yVelocity);
+      player.p.yVelocity = 0;
+      player.p.onGround = true;
+      player.p.onCeiling = false;
     } else if (player.p.y > maxY) {
       player.p.y = maxY;
-      player.p.yVelocity = Math.min(0, player.p.yVelocity);
+      player.p.yVelocity = 0;
+      player.p.onGround = false;
+      player.p.onCeiling = true;
     }
   }
 
   function enterSwing(player) {
     if (!player?.p || player.p.isSwing) return;
-    // IMPORTANT: preserve the exact gravity at the portal. Entering Swing
-    // must never flip gravity by itself.
-    const entryGravity = !!player.p.gravityFlipped;
+    const gravityAtEntry = !!player.p.gravityFlipped;
 
+    // Exit the old mode first, then restore the exact gravity from the portal.
     player.exitSpiderMode?.();
     player.exitRobotMode?.();
     player.exitBallMode?.();
@@ -105,51 +146,53 @@
     player.p.isWave = false;
     player.p.isSpider = false;
     player.p.isRobot = false;
-    player.p.gravityFlipped = entryGravity;
-    player.p.onGround = false;
-    player.p.canJump = false;
-    player.p.isJumping = false;
-    player.p.yVelocity = 0;
-    player.p.upKeyPressed = false;
-    player.p.queuedHold = false;
-
-    player.stopRotation?.();
-    player._rotation = entryGravity ? Math.PI : 0;
-    player.setCubeVisible(false);
-    player.setShipVisible(false);
-    player.setBallVisible?.(false);
-    player.setWaveVisible?.(false);
-    player.setSpiderVisible?.(false);
-    player.setRobotVisible?.(false);
-    setSwingVisibility(player, true);
-    clampSwingToLevelBounds(player);
-  }
-
-  function exitSwing(player) {
-    if (!player?.p?.isSwing) return;
-    player.p.isSwing = false;
-    player.p.onGround = false;
-    player.p.canJump = false;
-    player.p.isJumping = false;
-    player.p.yVelocity = 0;
-    setSwingVisibility(player, false);
-    player.setCubeVisible(!player.p.isFlying && !player.p.isWave && !player.p.isUfo && !player.p.isSpider && !player.p.isRobot);
-  }
-
-  function swingClick(player) {
-    if (!player?.p?.isSwing || player.p.isDead) return;
-    player.p.gravityFlipped = !player.p.gravityFlipped;
-    // A Swing click changes gravity smoothly; do not inject a huge vertical
-    // velocity, which was causing the icon to shoot off-screen.
+    player.p.gravityFlipped = gravityAtEntry;
     player.p.yVelocity = 0;
     player.p.onGround = false;
+    player.p.onCeiling = false;
     player.p.canJump = false;
     player.p.isJumping = false;
     player.p.upKeyPressed = false;
     player.p.queuedHold = false;
     player.p._orbActivationConsumedForPress = true;
     player.stopRotation?.();
-    player._rotation = player.p.gravityFlipped ? Math.PI : 0;
+    player._rotation = 0;
+
+    player.setCubeVisible(false);
+    player.setShipVisible(false);
+    player.setBallVisible?.(false);
+    player.setWaveVisible?.(false);
+    player.setSpiderVisible?.(false);
+    player.setRobotVisible?.(false);
+    setSwingVisible(player, true);
+    clampSwingToBounds(player);
+  }
+
+  function exitSwing(player) {
+    if (!player?.p?.isSwing) return;
+    player.p.isSwing = false;
+    player.p.onGround = false;
+    player.p.onCeiling = false;
+    player.p.canJump = false;
+    player.p.isJumping = false;
+    player.p.yVelocity = 0;
+    setSwingVisible(player, false);
+    player.setCubeVisible(!player.p.isFlying && !player.p.isWave && !player.p.isUfo && !player.p.isSpider && !player.p.isRobot);
+  }
+
+  function swingClick(player) {
+    if (!player?.p?.isSwing || player.p.isDead) return;
+    player.p.gravityFlipped = !player.p.gravityFlipped;
+    player.p.yVelocity = 0;
+    player.p.onGround = false;
+    player.p.onCeiling = false;
+    player.p.canJump = false;
+    player.p.isJumping = false;
+    player.p.upKeyPressed = false;
+    player.p.queuedHold = false;
+    player.p._orbActivationConsumedForPress = true;
+    player.stopRotation?.();
+    player._rotation = 0;
   }
 
   if (typeof PlayerObject !== 'undefined' && PlayerObject.prototype) {
@@ -175,15 +218,16 @@
       PlayerObject.prototype.updateJump = function(dt) {
         if (!this.p?.isSwing) return originalUpdateJump.call(this, dt);
         const frame = Math.max(0, Number(dt) || 0);
-        const gravityBase = typeof p === 'number' ? p : 1;
         const gravitySign = this.p.gravityFlipped ? -1 : 1;
-        this.p.yVelocity -= gravityBase * SWING_GRAVITY_SCALE * frame * gravitySign;
+        const gravityBase = typeof p === 'number' ? p : 1;
+        this.p.yVelocity -= gravityBase * SWING_GRAVITY * frame * gravitySign;
         this.p.yVelocity = Math.max(-SWING_MAX_VELOCITY, Math.min(SWING_MAX_VELOCITY, this.p.yVelocity));
         this.p.onGround = false;
+        this.p.onCeiling = false;
         this.p.canJump = false;
         this.p.isJumping = false;
-        clampSwingToLevelBounds(this);
-        this._rotation = this.p.gravityFlipped ? Math.PI : 0;
+        clampSwingToBounds(this);
+        this._rotation = 0;
       };
     }
 
@@ -191,21 +235,55 @@
     if (typeof originalCheckCollisions === 'function' && !PlayerObject.prototype.__gd22SwingCollisionPatched) {
       PlayerObject.prototype.__gd22SwingCollisionPatched = true;
       PlayerObject.prototype.checkCollisions = function(...args) {
+        let enteredThisFrame = false;
         if (!this.p?.isDead && !this.p?.ignorePortals && this._gameLayer?.getNearbySectionObjects) {
           const pieceWidth = Number(args[0]) + (typeof centerX === 'number' ? centerX : 0);
           const nearby = this._gameLayer.getNearbySectionObjects(pieceWidth) || [];
           for (const obj of nearby) {
-            if (!isSwingCollider(this, obj) || !isActuallyTouchingSwingPortal(this, obj, pieceWidth)) continue;
+            if (!isSwingCollider(this, obj) || !touchesPortal(this, obj, pieceWidth)) continue;
             obj.type = 'portal_swing';
             obj.swingPortal = true;
             if (!this._isObjectActivated?.(obj)) {
               this._setObjectActivated?.(obj, true);
               this._playPortalShine?.(obj);
-              enterSwing(this, obj);
+              enterSwing(this);
+              enteredThisFrame = true;
             }
             break;
           }
         }
+
+        // Do not let the same collision pass continue through the old portal
+        // chain after entering Swing. That was immediately re-processing the
+        // portal and could flip gravity or put the player into Ship.
+        if (enteredThisFrame) {
+          this._lastCollisionWorldX = Number(args[0]) + (typeof centerX === 'number' ? centerX : 0);
+          this._lastCollisionWorldY = this.p.y;
+          return;
+        }
+
+        if (this.p?.isSwing) {
+          // Native collision code already has the correct Ship/Fly treatment
+          // for floor and ceiling. Temporarily expose Swing as aerial only
+          // while collision is calculated; restore Swing immediately after.
+          const savedFlying = this.p.isFlying;
+          const savedGround = this.p.onGround;
+          const savedCeiling = this.p.onCeiling;
+          this.p.isFlying = true;
+          try {
+            const result = originalCheckCollisions.apply(this, args);
+            return result;
+          } finally {
+            this.p.isFlying = savedFlying;
+            this.p.onGround = savedGround;
+            this.p.onCeiling = savedCeiling;
+            this.p.isSwing = true;
+            this.setShipVisible(false);
+            setSwingVisible(this, true);
+            clampSwingToBounds(this);
+          }
+        }
+
         return originalCheckCollisions.apply(this, args);
       };
     }
@@ -216,11 +294,16 @@
       PlayerObject.prototype.syncSprites = function(...args) {
         const result = originalSyncSprites.apply(this, args);
         if (this.p?.isSwing) {
-          setSwingVisibility(this, true);
-          syncSwingSprite(this);
+          setSwingVisible(this, true);
+          syncSwingSprite(this, Number(args[2]) || 0);
+          this.setCubeVisible(false);
           this.setShipVisible(false);
+          this.setBallVisible?.(false);
+          this.setWaveVisible?.(false);
+          this.setSpiderVisible?.(false);
+          this.setRobotVisible?.(false);
         } else if (this._swingSprite) {
-          this._swingSprite.setVisible(false);
+          setSwingVisible(this, false);
         }
         return result;
       };
