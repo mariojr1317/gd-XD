@@ -1,14 +1,10 @@
 /* Geometry Dash 2.2 Swing compatibility layer.
- * Maps the real level-object definition to portal_swing before PlayerObject
- * processes collisions, so the normal portal_fly -> Ship path is never used.
  * Platformer and Spider Orb remain untouched.
  */
 (() => {
   if (window.__gd22SwingCompatLoaded) return;
   window.__gd22SwingCompatLoaded = true;
 
-  // 1933 is kept as a fallback for object tables that do not expose `sub`.
-  // If allObjects provides sub:"swing", that definition is preferred.
   const SWING_PORTAL_ID = 1933;
   const SWING_GRAVITY = 1.13;
   const SWING_CLICK_VELOCITY = 10.5;
@@ -20,29 +16,46 @@
     return Number(levelObj.id) === SWING_PORTAL_ID;
   }
 
+  // level.js stores the original level object in _resetobject using the same
+  // _eeObjectId that is copied onto its collider. This lets us identify the
+  // Swing portal even if its collider was initially classified as portal_fly.
+  function getSourceLevelObject(player, collider) {
+    const linkedId = collider?._eeObjectId;
+    if (linkedId === undefined || linkedId === null) return null;
+    const layer = player?._gameLayer;
+    return layer?._resetobject?.[linkedId] || layer?._resetObject?.[linkedId] || null;
+  }
+
+  function isSwingCollider(player, collider) {
+    if (!collider) return false;
+    if (String(collider.type || "").toLowerCase() === "portal_swing") return true;
+    const source = getSourceLevelObject(player, collider);
+    return Number(source?.id) === SWING_PORTAL_ID ||
+      String(source?.sub || "").toLowerCase() === "swing";
+  }
+
   function setSwingVisibility(player, visible) {
     if (!player) return;
     if (!player._swingSprite) {
       const scene = player._scene;
       const candidates = [
-        String(window.currentSwing || "swing_01") + "_001.png",
         "swing_01_001.png",
         "swing_01_2_001.png",
         "swing_01_extra_001.png"
       ];
-      for (const frame of [...new Set(candidates)]) {
+      for (const frame of candidates) {
         try {
           if (typeof addImageToScene === "function") {
             const sprite = addImageToScene(scene, 0, 0, frame);
             if (sprite) {
               player._swingSprite = sprite;
-              player._swingSprite.setOrigin(0.5, 0.5);
-              player._swingSprite.setDepth(12);
+              sprite.setOrigin(0.5, 0.5);
+              sprite.setDepth(12);
               break;
             }
           }
           const info = typeof getAtlasFrame === "function" ? getAtlasFrame(scene, frame) : null;
-          if (info) {
+          if (info && scene?.add?.image) {
             player._swingSprite = scene.add.image(0, 0, info.atlas, info.frame);
             player._swingSprite.setOrigin(0.5, 0.5);
             player._swingSprite.setDepth(12);
@@ -74,7 +87,7 @@
   }
 
   function enterSwing(player, portal = null) {
-    if (!player || !player.p || player.p.isSwing) return;
+    if (!player?.p || player.p.isSwing) return;
     player.exitSpiderMode?.();
     player.exitRobotMode?.();
     player.exitBallMode?.();
@@ -95,10 +108,12 @@
     player.p.yVelocity = 0;
     player.p.upKeyPressed = false;
     player.p.queuedHold = false;
+
     if (portal) {
       const portalY = Number(portal.portalY ?? portal.y);
       if (Number.isFinite(portalY)) player.p.y = portalY;
     }
+
     player.stopRotation?.();
     player._rotation = player.p.gravityFlipped ? Math.PI : 0;
     player.setCubeVisible(false);
@@ -137,33 +152,6 @@
     player._rotation = player.p.gravityFlipped ? Math.PI : 0;
   }
 
-  if (typeof LevelObject !== "undefined" && LevelObject.prototype && !LevelObject.prototype.__gd22SwingObjectMappingPatched) {
-    LevelObject.prototype.__gd22SwingObjectMappingPatched = true;
-    const originalSpawnObject = LevelObject.prototype._spawnObject;
-    if (typeof originalSpawnObject === "function") {
-      LevelObject.prototype._spawnObject = function(levelObj, ...args) {
-        const objectDef = typeof getObjectFromId === "function" ? getObjectFromId(levelObj?.id) : null;
-        const result = originalSpawnObject.call(this, levelObj, ...args);
-        if (!isSwingDefinition(levelObj, objectDef)) return result;
-
-        // _spawnObject creates the collider with objectDef.sub -> portal type.
-        // Convert only this object's collider to the dedicated Swing type.
-        const linkedId = levelObj?._eeObjectId;
-        for (const collider of this.objects || []) {
-          if (!collider || collider._eeObjectId !== linkedId) continue;
-          if (String(collider.type || "").startsWith("portal_") || collider.type === "portal") {
-            collider.type = "portal_swing";
-            collider.swingPortal = true;
-            collider.swingPortalId = Number(levelObj.id) || SWING_PORTAL_ID;
-            collider.portalX = collider.portalX ?? collider.x;
-            collider.portalY = collider.portalY ?? collider.y;
-          }
-        }
-        return result;
-      };
-    }
-  }
-
   if (typeof PlayerObject !== "undefined" && PlayerObject.prototype) {
     PlayerObject.prototype.enterSwingMode = function(portal = null) { enterSwing(this, portal); };
     PlayerObject.prototype.exitSwingMode = function() { exitSwing(this); };
@@ -188,19 +176,16 @@
         if (!this.p?.isSwing) return originalUpdateJump.call(this, dt);
         const frame = Math.max(0, Number(dt) || 0);
 
-        // Swing uses its own gravity + click impulse; it never enters _updateFlyJump().
-        this.p.yVelocity -= SWING_GRAVITY * frame * this.flipMod();
-        if (this.p.gravityFlipped) {
-          this.p.yVelocity = Math.min(this.p.yVelocity, SWING_MAX_VELOCITY);
-        } else {
-          this.p.yVelocity = Math.max(this.p.yVelocity, -SWING_MAX_VELOCITY);
-        }
+        // Dedicated Swing gravity. It never enters Ship's fly physics.
+        const gravitySign = this.p.gravityFlipped ? -1 : 1;
+        this.p.yVelocity += SWING_GRAVITY * frame * gravitySign;
+        this.p.yVelocity = Math.max(-SWING_MAX_VELOCITY, Math.min(SWING_MAX_VELOCITY, this.p.yVelocity));
         this.p.onGround = false;
         this.p.canJump = false;
         this.p.isJumping = false;
 
+        const target = this.p.gravityFlipped ? Math.PI : 0;
         if (!this.rotateActionActive) {
-          const target = this.p.gravityFlipped ? Math.PI : 0;
           this._rotation += (target - this._rotation) * Math.min(1, frame * 0.35);
         }
       };
@@ -214,23 +199,20 @@
           const pieceWidth = (Number(args[0]) || 0) + (typeof centerX === "number" ? centerX : 0);
           const nearby = this._gameLayer.getNearbySectionObjects(pieceWidth) || [];
           for (const obj of nearby) {
-            if (String(obj?.type || "").toLowerCase() !== "portal_swing") continue;
-            const half = this.p.isMini ? 18 : 30;
-            const portalW = Number(obj.w) || 30;
-            const portalH = Number(obj.h) || 60;
-            const dx = pieceWidth - Number(obj.x || 0);
-            const dy = this.p.y - Number(obj.y || 0);
-            const hw = portalW * 0.5 + half;
-            const hh = portalH * 0.5 + half;
-            if (Math.abs(dx) > hw || Math.abs(dy) > hh) continue;
+            if (!isSwingCollider(this, obj)) continue;
 
-            if (typeof this._isObjectActivated !== "function" || !this._isObjectActivated(obj)) {
+            // Convert the live collider before native collision code reads
+            // gameObj.type. This is the important part that prevents the
+            // existing portal_fly branch from turning Swing into Ship.
+            obj.type = "portal_swing";
+            obj.swingPortal = true;
+            obj.swingPortalId = SWING_PORTAL_ID;
+
+            if (!this._isObjectActivated?.(obj)) {
               this._setObjectActivated?.(obj, true);
               this._playPortalShine?.(obj);
               enterSwing(this, obj);
             }
-            // Let the original collision pass continue. It now sees portal_swing,
-            // not portal_fly, so it cannot send the player into Ship mode.
             break;
           }
         }
@@ -262,8 +244,8 @@
         const result = originalCreate.apply(this, args);
         const scene = this;
         const handlePress = () => {
-          if (scene._state?.isSwing) swingClick(scene._player);
-          if (scene._isDual && scene._state2?.isSwing) swingClick(scene._player2);
+          if (scene._player?.p?.isSwing) swingClick(scene._player);
+          if (scene._player2?.p?.isSwing) swingClick(scene._player2);
         };
         scene.input?.on("pointerdown", handlePress);
         scene.input?.keyboard?.on("keydown-SPACE", handlePress);
@@ -272,32 +254,11 @@
         return result;
       };
     }
-
-    const originalGetDualModeId = GameScene.prototype._getDualModeId;
-    if (typeof originalGetDualModeId === "function") {
-      GameScene.prototype._getDualModeId = function(state) {
-        if (state?.isSwing) return "swing";
-        return originalGetDualModeId.call(this, state);
-      };
-    }
-
-    const originalSetPlayerGamemode = GameScene.prototype._setPlayerGamemode;
-    if (typeof originalSetPlayerGamemode === "function") {
-      GameScene.prototype._setPlayerGamemode = function(player, state, mode, keepVelocity = true) {
-        if (mode === "swing") {
-          enterSwing(player);
-          if (!keepVelocity) state.yVelocity = 0;
-          return;
-        }
-        if (state?.isSwing && mode !== "swing") exitSwing(player);
-        return originalSetPlayerGamemode.call(this, player, state, mode, keepVelocity);
-      };
-    }
   }
 
   window.gd22Swing = {
-    enter: (player) => enterSwing(player),
-    exit: (player) => exitSwing(player),
-    click: (player) => swingClick(player)
+    enter: player => enterSwing(player),
+    exit: player => exitSwing(player),
+    click: player => swingClick(player)
   };
 })();
