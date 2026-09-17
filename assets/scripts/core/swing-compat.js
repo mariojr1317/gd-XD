@@ -116,18 +116,16 @@
     PlayerObject.prototype.enterSwingMode = function(portal = null) { enterSwing(this, portal); };
     PlayerObject.prototype.exitSwingMode = function() { exitSwing(this); };
 
-    /* Replace the normal cube/ship update only while Swing is active. */
     const originalUpdateJump = PlayerObject.prototype.updateJump;
     if (typeof originalUpdateJump === "function" && !PlayerObject.prototype.__gd22SwingPhysicsPatched) {
       PlayerObject.prototype.__gd22SwingPhysicsPatched = true;
       PlayerObject.prototype.updateJump = function(dt) {
         if (!this.p?.isSwing) return originalUpdateJump.call(this, dt);
         const frame = Math.max(0, Number(dt) || 0);
+        this.p.yVelocity -= SWING_GRAVITY * frame * this.flipMod();
         if (this.p.gravityFlipped) {
-          this.p.yVelocity -= SWING_GRAVITY * frame * this.flipMod();
           this.p.yVelocity = Math.min(this.p.yVelocity, SWING_MAX_VELOCITY);
         } else {
-          this.p.yVelocity -= SWING_GRAVITY * frame * this.flipMod();
           this.p.yVelocity = Math.max(this.p.yVelocity, -SWING_MAX_VELOCITY);
         }
         this.p.onGround = false;
@@ -162,7 +160,9 @@
                   this._playPortalShine?.(obj);
                   enterSwing(this, obj);
                 }
-                break;
+                /* The original collision pass may classify the same object as
+                 * a ship/fly portal. Do not run it again after Swing activates. */
+                return true;
               }
             }
           }
