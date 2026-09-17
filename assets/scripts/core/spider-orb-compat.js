@@ -38,8 +38,6 @@
   }
 
   function arrowPointsUp(player, gameObj) {
-    // Spider objects use their original level rotation. 0 degrees is UP and
-    // 180 degrees is DOWN. Vertical flip reverses the direction.
     const source = getSourceLevelObject(player, gameObj);
     let rotation = Number(source?.rot);
     if (!Number.isFinite(rotation)) rotation = Number(gameObj?.orbRotation);
@@ -80,8 +78,6 @@
       player.p.y = floorY + playerSize;
     }
 
-    // The object's direction decides the resulting gravity, independent of
-    // the gravity the player had before touching it.
     player.flipGravity(pointsUp, 1.0);
     player._syncOtherDualGravityForBlueBoost();
     player.playGravityEffect(pointsUp);
@@ -98,9 +94,18 @@
   }
 
   function consumeSpiderInput(player) {
+    player.p._gd22SpiderInputPressed = false;
     if (typeof player._consumeOrbActivationInput === 'function') {
       player._consumeOrbActivationInput();
     }
+  }
+
+  function spiderInputPressed(player) {
+    if (!player?.p) return false;
+    if (player.p._gd22SpiderInputPressed) return true;
+    if (player.p.upKeyPressed) return true;
+    if (player.p.upKeyDown && !player.p.wasUpKeyDown) return true;
+    return false;
   }
 
   if (typeof PlayerObject === 'undefined' || !PlayerObject.prototype) return;
@@ -126,29 +131,44 @@
         }
       }
 
-      // Spider Orb still requires a tap/click.
-      if (!activatedSpiderObject) {
-        const justPressed = this.p.upKeyDown && !this.p.wasUpKeyDown;
-        const needsClick = justPressed || (this.p.queuedHold && this.p.upKeyDown);
+      // Spider Orb activates from any normal jump/click input: mouse, touch,
+      // Space, Up, or whatever input the game maps to upKeyPressed/upKeyDown.
+      if (!activatedSpiderObject && spiderInputPressed(this)) {
+        for (const gameObj of nearby) {
+          if (!isSpiderOrbObject(gameObj)) continue;
+          if (!isTouchingSpiderObject(this, gameObj, pieceWidth)) continue;
 
-        if (needsClick) {
-          for (const gameObj of nearby) {
-            if (!isSpiderOrbObject(gameObj)) continue;
-            if (!isTouchingSpiderObject(this, gameObj, pieceWidth)) continue;
-
-            if (activateSpiderObject(this, gameObj)) {
-              consumeSpiderInput(this);
-              activatedSpiderObject = true;
-              break;
-            }
+          if (activateSpiderObject(this, gameObj)) {
+            consumeSpiderInput(this);
+            activatedSpiderObject = true;
+            break;
           }
         }
       }
     }
 
-    // Let exactly one Spider Orb/Pad consume the collision frame. This keeps
-    // the native jump-pad/orb branch from processing the same object again.
     if (activatedSpiderObject) return;
     return originalCheckCollisions.apply(this, args);
   };
+
+  // Mouse/touch and keyboard events are captured here so the Spider Orb can
+  // react even when the input system does not expose the press as upKeyPressed.
+  if (typeof GameScene !== 'undefined' && GameScene.prototype && !GameScene.prototype.__gd22SpiderOrbInputPatched) {
+    GameScene.prototype.__gd22SpiderOrbInputPatched = true;
+    const originalCreate = GameScene.prototype.create;
+    if (typeof originalCreate === 'function') {
+      GameScene.prototype.create = function(...args) {
+        const result = originalCreate.apply(this, args);
+        const scene = this;
+        const markPress = () => {
+          if (scene._player?.p) scene._player.p._gd22SpiderInputPressed = true;
+          if (scene._player2?.p) scene._player2.p._gd22SpiderInputPressed = true;
+        };
+        scene.input?.on('pointerdown', markPress);
+        scene.input?.keyboard?.on('keydown-SPACE', markPress);
+        scene.input?.keyboard?.on('keydown-UP', markPress);
+        return result;
+      };
+    }
+  }
 })();
