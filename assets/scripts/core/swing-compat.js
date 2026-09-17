@@ -1,21 +1,36 @@
 /* Geometry Dash 2.2 Swing compatibility layer.
- * Keeps Platformer untouched and reuses the existing PlayerObject/GameScene.
+ * Maps the real level-object definition to portal_swing before PlayerObject
+ * processes collisions, so the normal portal_fly -> Ship path is never used.
+ * Platformer and Spider Orb remain untouched.
  */
 (() => {
   if (window.__gd22SwingCompatLoaded) return;
   window.__gd22SwingCompatLoaded = true;
 
+  // 1933 is kept as a fallback for object tables that do not expose `sub`.
+  // If allObjects provides sub:"swing", that definition is preferred.
   const SWING_PORTAL_ID = 1933;
   const SWING_GRAVITY = 1.13;
   const SWING_CLICK_VELOCITY = 10.5;
   const SWING_MAX_VELOCITY = 18;
 
+  function isSwingDefinition(levelObj, objectDef) {
+    if (!levelObj) return false;
+    if (String(objectDef?.sub || "").toLowerCase() === "swing") return true;
+    return Number(levelObj.id) === SWING_PORTAL_ID;
+  }
+
   function setSwingVisibility(player, visible) {
     if (!player) return;
     if (!player._swingSprite) {
       const scene = player._scene;
-      const candidates = ["swing_01_001.png", "swing_01_2_001.png", "swing_01_extra_001.png"];
-      for (const frame of candidates) {
+      const candidates = [
+        String(window.currentSwing || "swing_01") + "_001.png",
+        "swing_01_001.png",
+        "swing_01_2_001.png",
+        "swing_01_extra_001.png"
+      ];
+      for (const frame of [...new Set(candidates)]) {
         try {
           if (typeof addImageToScene === "function") {
             const sprite = addImageToScene(scene, 0, 0, frame);
@@ -65,17 +80,25 @@
     player.exitBallMode?.();
     player.exitWaveMode?.();
     player.exitShipMode?.();
+    player.exitUfoMode?.();
+
     player.p.isSwing = true;
     player.p.isFlying = false;
     player.p.isUfo = false;
     player.p.isBall = false;
     player.p.isWave = false;
     player.p.isSpider = false;
+    player.p.isRobot = false;
     player.p.onGround = false;
     player.p.canJump = false;
     player.p.isJumping = false;
     player.p.yVelocity = 0;
-    if (portal && Number.isFinite(portal.portalY)) player.p.y = portal.portalY;
+    player.p.upKeyPressed = false;
+    player.p.queuedHold = false;
+    if (portal) {
+      const portalY = Number(portal.portalY ?? portal.y);
+      if (Number.isFinite(portalY)) player.p.y = portalY;
+    }
     player.stopRotation?.();
     player._rotation = player.p.gravityFlipped ? Math.PI : 0;
     player.setCubeVisible(false);
@@ -96,7 +119,7 @@
     player.p.isJumping = false;
     player.p.yVelocity = 0;
     setSwingVisibility(player, false);
-    player.setCubeVisible(!player.p.isBall && !player.p.isFlying && !player.p.isWave && !player.p.isUfo && !player.p.isSpider);
+    player.setCubeVisible(!player.p.isBall && !player.p.isFlying && !player.p.isWave && !player.p.isUfo && !player.p.isSpider && !player.p.isRobot);
     player._setGamemodeFlyBounds?.(false, 0);
   }
 
@@ -110,14 +133,41 @@
     player.p.upKeyPressed = false;
     player.p.queuedHold = false;
     player.p._orbActivationConsumedForPress = true;
+    player.stopRotation?.();
+    player._rotation = player.p.gravityFlipped ? Math.PI : 0;
+  }
+
+  if (typeof LevelObject !== "undefined" && LevelObject.prototype && !LevelObject.prototype.__gd22SwingObjectMappingPatched) {
+    LevelObject.prototype.__gd22SwingObjectMappingPatched = true;
+    const originalSpawnObject = LevelObject.prototype._spawnObject;
+    if (typeof originalSpawnObject === "function") {
+      LevelObject.prototype._spawnObject = function(levelObj, ...args) {
+        const objectDef = typeof getObjectFromId === "function" ? getObjectFromId(levelObj?.id) : null;
+        const result = originalSpawnObject.call(this, levelObj, ...args);
+        if (!isSwingDefinition(levelObj, objectDef)) return result;
+
+        // _spawnObject creates the collider with objectDef.sub -> portal type.
+        // Convert only this object's collider to the dedicated Swing type.
+        const linkedId = levelObj?._eeObjectId;
+        for (const collider of this.objects || []) {
+          if (!collider || collider._eeObjectId !== linkedId) continue;
+          if (String(collider.type || "").startsWith("portal_") || collider.type === "portal") {
+            collider.type = "portal_swing";
+            collider.swingPortal = true;
+            collider.swingPortalId = Number(levelObj.id) || SWING_PORTAL_ID;
+            collider.portalX = collider.portalX ?? collider.x;
+            collider.portalY = collider.portalY ?? collider.y;
+          }
+        }
+        return result;
+      };
+    }
   }
 
   if (typeof PlayerObject !== "undefined" && PlayerObject.prototype) {
     PlayerObject.prototype.enterSwingMode = function(portal = null) { enterSwing(this, portal); };
     PlayerObject.prototype.exitSwingMode = function() { exitSwing(this); };
 
-    // The normal portal code can see the Swing portal as portal_fly afterwards.
-    // While Swing is active, block that fallback from switching the player to Ship.
     const originalEnterShipMode = PlayerObject.prototype.enterShipMode;
     if (typeof originalEnterShipMode === "function" && !PlayerObject.prototype.__gd22SwingShipGuardPatched) {
       PlayerObject.prototype.__gd22SwingShipGuardPatched = true;
@@ -137,6 +187,8 @@
       PlayerObject.prototype.updateJump = function(dt) {
         if (!this.p?.isSwing) return originalUpdateJump.call(this, dt);
         const frame = Math.max(0, Number(dt) || 0);
+
+        // Swing uses its own gravity + click impulse; it never enters _updateFlyJump().
         this.p.yVelocity -= SWING_GRAVITY * frame * this.flipMod();
         if (this.p.gravityFlipped) {
           this.p.yVelocity = Math.min(this.p.yVelocity, SWING_MAX_VELOCITY);
@@ -146,6 +198,7 @@
         this.p.onGround = false;
         this.p.canJump = false;
         this.p.isJumping = false;
+
         if (!this.rotateActionActive) {
           const target = this.p.gravityFlipped ? Math.PI : 0;
           this._rotation += (target - this._rotation) * Math.min(1, frame * 0.35);
@@ -161,23 +214,24 @@
           const pieceWidth = (Number(args[0]) || 0) + (typeof centerX === "number" ? centerX : 0);
           const nearby = this._gameLayer.getNearbySectionObjects(pieceWidth) || [];
           for (const obj of nearby) {
-            const type = String(obj?.type || "").toLowerCase();
-            const id = Number(obj?.id ?? obj?.objectId ?? obj?.objId ?? obj?.objid);
-            if (type === "portal_swing" || type === "swing_portal" || id === SWING_PORTAL_ID) {
-              const half = this.p.isMini ? 18 : 30;
-              const dx = pieceWidth - Number(obj.x || 0);
-              const dy = this.p.y - Number(obj.y || 0);
-              const hw = Number(obj.w || 30) * 0.5 + half;
-              const hh = Number(obj.h || 60) * 0.5 + half;
-              if (Math.abs(dx) <= hw && Math.abs(dy) <= hh) {
-                if (typeof this._isObjectActivated !== "function" || !this._isObjectActivated(obj)) {
-                  this._setObjectActivated?.(obj, true);
-                  this._playPortalShine?.(obj);
-                  enterSwing(this, obj);
-                }
-                return true;
-              }
+            if (String(obj?.type || "").toLowerCase() !== "portal_swing") continue;
+            const half = this.p.isMini ? 18 : 30;
+            const portalW = Number(obj.w) || 30;
+            const portalH = Number(obj.h) || 60;
+            const dx = pieceWidth - Number(obj.x || 0);
+            const dy = this.p.y - Number(obj.y || 0);
+            const hw = portalW * 0.5 + half;
+            const hh = portalH * 0.5 + half;
+            if (Math.abs(dx) > hw || Math.abs(dy) > hh) continue;
+
+            if (typeof this._isObjectActivated !== "function" || !this._isObjectActivated(obj)) {
+              this._setObjectActivated?.(obj, true);
+              this._playPortalShine?.(obj);
+              enterSwing(this, obj);
             }
+            // Let the original collision pass continue. It now sees portal_swing,
+            // not portal_fly, so it cannot send the player into Ship mode.
+            break;
           }
         }
         return originalCheckCollisions.apply(this, args);
