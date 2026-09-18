@@ -4616,12 +4616,87 @@ if (this.p.isFlying || this.p.isUfo) {
         } else if (_colType === jumpRingType) {
           const _orbId = gameObj.orbId;
           const _isDash = (_orbId === 1704 || _orbId === 1751);
+          const _isSpiderOrb = (_orbId === 3004);
           const justPressed = this.p.upKeyDown && !this.p.wasUpKeyDown;
           const _needsClick = !_orbInputConsumedThisStep && !this.p._orbActivationConsumedForPress && ((this.p.isFlying || this.p.isUfo) ? justPressed : (justPressed || (this.p.queuedHold && this.p.upKeyDown)));
           this.p.touchingRing = true;
           if (!this._isObjectActivated(gameObj) && _needsClick) {
             this._orbpadHitEffect(gameObj, true);
-            if (_isDash) {
+            if (_isSpiderOrb) {
+              const _spPlayerSize = this.p.isMini ? 18 : 30;
+              const _spGoingUp = !this.p.gravityFlipped;
+              const _spWorldX = this._scene?._playerWorldX ?? centerX;
+              const _spSurfaceY = this._findSpiderTeleportSurface?.(
+                _spGoingUp,
+                _spWorldX,
+                _spPlayerSize
+              );
+
+              this._setObjectActivated(gameObj, true);
+              this._consumeOrbActivationInput();
+
+              if (_spSurfaceY !== null && Number.isFinite(_spSurfaceY)) {
+                const _spTargetY = _spGoingUp
+                  ? _spSurfaceY - _spPlayerSize
+                  : _spSurfaceY + _spPlayerSize;
+                const _spHazard = this._findSpiderTeleportHazard?.(
+                  _spGoingUp,
+                  _spWorldX,
+                  _spPlayerSize,
+                  _spTargetY
+                );
+
+                const _spOldY = this.p.y;
+                if (_spHazard && !window.noClip) {
+                  const _spBounds = _spHazard.bounds;
+                  const _spHazardY = (Number(_spBounds?.lower) + Number(_spBounds?.upper)) / 2;
+                  this.p.y = Number.isFinite(_spHazardY) ? _spHazardY : _spTargetY;
+                  this.p.yVelocity = 0;
+                  this.p.onGround = false;
+                  this.p.canJump = false;
+                  this.p.isJumping = false;
+                  this._spawnSpiderTeleportEffects?.(_spOldY, this.p.y);
+                  this._orbpadHitEffect(gameObj, true);
+                  this.killPlayer();
+                  _orbInputConsumedThisStep = true;
+                  _boostedThisStep = true;
+                  this._markActivatedOrbSprites(gameObj);
+                  continue;
+                }
+
+                this.p.y = _spTargetY;
+                this.flipGravity(_spGoingUp, 1.0);
+                this._syncOtherDualGravityForBlueBoost();
+                this.playGravityEffect(this.p.gravityFlipped);
+                this.p.yVelocity = 0;
+                this.p.onGround = true;
+                this.p.onCeiling = _spGoingUp;
+                this.p.canJump = true;
+                this.p.isJumping = false;
+                this.p._spiderTeleportNoclipDeathPending = false;
+                this._spawnSpiderTeleportEffects?.(_spOldY, this.p.y);
+
+                if (_spHazard && window.noClip) {
+                  this.p._spiderTeleportNoclipDeathPending = true;
+                  this.p.diedThisFrame = true;
+                }
+              } else {
+                this.flipGravity(_spGoingUp, 1.0);
+                this._syncOtherDualGravityForBlueBoost();
+                this.playGravityEffect(this.p.gravityFlipped);
+                this.p.yVelocity = 0;
+                this.p.onGround = false;
+                this.p.onCeiling = false;
+                this.p.canJump = false;
+                this.p.isJumping = false;
+              }
+
+              this._orbpadHitEffect(gameObj, true);
+              this.runRotateAction();
+              _orbInputConsumedThisStep = true;
+              _boostedThisStep = true;
+              this._markActivatedOrbSprites(gameObj);
+            } else if (_isDash) {
               const dashHoldTicks = this._getDashHoldTicks(gameObj) + 1;
               this._setDashHoldTicks(gameObj, dashHoldTicks);
               if (dashHoldTicks < 2) {
