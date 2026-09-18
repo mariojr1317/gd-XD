@@ -8,6 +8,7 @@
   const SWING_MAX_VELOCITY = 13;
   const SWING_ANIM_DISTANCE = 12;
   const SWING_ANIM_DURATION = 0.18;
+  const SWING_ANIM_ROTATION = Math.PI;
 
   function getSourceLevelObject(player, collider) {
     const id = collider?._eeObjectId;
@@ -67,6 +68,7 @@
     }
     player._swingSprite = player._swingBase || null;
     player._swingAnimOffset = 0;
+    player._swingAnimRotation = 0;
     player._swingAnimProgress = 1;
     player._swingAnimActive = false;
     tintSwingLayers(player);
@@ -119,6 +121,7 @@
     const baseY = Number.isFinite(player._lastScreenY) ? player._lastScreenY : b(player.p.y);
     const gravityDirection = player.p.gravityFlipped ? -1 : 1;
     const offset = Number(player._swingAnimOffset) || 0;
+    const animationRotation = Number(player._swingAnimRotation) || 0;
     const y = baseY + offset * gravityDirection;
     const mini = player.p.isMini ? 0.6 : 1;
     const layers = [player._swingGlow, player._swingBase, player._swingOverlay, player._swingExtra];
@@ -127,7 +130,7 @@
       if (!spr) continue;
       spr.x = x;
       spr.y = y;
-      spr.rotation = 0;
+      spr.rotation = animationRotation;
       spr.scaleX = player.p.mirrored ? -mini : mini;
       spr.scaleY = mini;
       spr.setVisible(true);
@@ -140,6 +143,7 @@
     if (!player?.p?.isSwing) return;
     // Animation starts only from an actual Swing click.
     player._swingAnimOffset = 0;
+    player._swingAnimRotation = 0;
     player._swingAnimProgress = 0;
     player._swingAnimActive = true;
   }
@@ -154,9 +158,11 @@
     const t = player._swingAnimProgress;
     const eased = 1 - Math.pow(1 - t, 3);
     player._swingAnimOffset = eased * SWING_ANIM_DISTANCE;
+    player._swingAnimRotation = eased * SWING_ANIM_ROTATION;
 
     if (t >= 1) {
       player._swingAnimOffset = 0;
+      player._swingAnimRotation = SWING_ANIM_ROTATION;
       player._swingAnimActive = false;
     }
   }
@@ -198,6 +204,12 @@
     player.exitUfoMode?.();
     player.p.isSwing = true;
     player.p.isFlying = false;
+    // Swing uses the same fly bounds as Ship. This creates the real physical ceiling.
+    if (typeof player._setGamemodeFlyBounds === 'function') {
+      const spawnY = Number.isFinite(Number(player.p.y)) ? player.p.y : 30;
+      player._setGamemodeFlyBounds(true, spawnY, typeof f === 'number' ? f : 600, false);
+      player._swingOwnsFlyBounds = true;
+    }
     player.p.isUfo = false;
     player.p.isBall = false;
     player.p.isWave = false;
@@ -213,6 +225,7 @@
     player.p.queuedHold = false;
     player.p._orbActivationConsumedForPress = true;
     player._swingAnimOffset = 0;
+    player._swingAnimRotation = 0;
     player._swingAnimProgress = 1;
     player._swingAnimActive = false;
     player.stopRotation?.();
@@ -237,8 +250,13 @@
     player.p.isJumping = false;
     player.p.yVelocity = 0;
     player._swingAnimOffset = 0;
+    player._swingAnimRotation = 0;
     player._swingAnimProgress = 1;
     player._swingAnimActive = false;
+    if (player._swingOwnsFlyBounds && typeof player._setGamemodeFlyBounds === 'function') {
+      player._setGamemodeFlyBounds(false, 0);
+      player._swingOwnsFlyBounds = false;
+    }
     setSwingVisible(player, false);
     if (player._swingCeilingGuide) player._swingCeilingGuide.setVisible(false);
     player.setCubeVisible(!player.p.isFlying && !player.p.isWave && !player.p.isUfo && !player.p.isSpider && !player.p.isRobot);
