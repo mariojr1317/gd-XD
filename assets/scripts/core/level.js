@@ -892,9 +892,14 @@ window.LevelObject = class LevelObject {
   }
 
   _makeTriggerBase(levelObj, linkedObjectId) {
+    const raw = levelObj?._raw || {};
+    const readBool = (key) => String(raw[key] ?? raw[String(key)] ?? "0") === "1";
     return {
       uid: linkedObjectId,
       spawnTriggered: this._isTriggerSpawnTriggered(levelObj),
+      touchTriggered: readBool(11),
+      multiTrigger: readBool(87),
+      editorDisabled: readBool(102),
       groups: this._getLevelObjectGroupIds(levelObj)
     };
   }
@@ -2180,7 +2185,7 @@ window.LevelObject = class LevelObject {
         duration: parseFloat(_raw[10] ?? 0),
         easingType: parseInt(_raw[30] ?? 0, 10),
         easingRate: parseFloat(_raw[85] ?? 2),
-        targetGroup: parseInt(_raw[51] ?? 0, 10),
+        targetGroup: this._parseSingleTriggerGroupId(_raw[51] ?? _raw["51"], 0),
         offsetX: parseFloat(_raw[28] ?? 0) * 2,
         offsetY: parseFloat(_raw[29] ?? 0) * 2,
         lockX: String(_raw?.[58] ?? _raw?.["58"] ?? "0") === "1",
@@ -2196,7 +2201,7 @@ window.LevelObject = class LevelObject {
         ...triggerBase,
         x: levelObj.x * 2,
         duration: parseFloat(_raw[10] ?? 0),
-        targetGroup: parseInt(_raw[51] ?? 0, 10),
+        targetGroup: this._parseSingleTriggerGroupId(_raw[51] ?? _raw["51"], 0),
         targetOpacity: Math.max(0, Math.min(1, parseFloat(_raw[35] ?? 1)))
       });
     }
@@ -2247,7 +2252,7 @@ window.LevelObject = class LevelObject {
       this._pulseTriggers.push({
         ...triggerBase,
         x: levelObj.x * 2,
-        targetGroup: targetType === 1 ? parseInt(_raw[51] ?? 0, 10) : 0,
+        targetGroup: targetType === 1 ? this._parseSingleTriggerGroupId(_raw[51] ?? _raw["51"], 0) : 0,
         targetChannel: targetType === 0 ? parseInt(_raw[51] ?? 0, 10) : 0,
         targetType: targetType,
         color: {
@@ -2268,7 +2273,7 @@ window.LevelObject = class LevelObject {
         x: levelObj.x * 2,
         y: levelObj.y * 2,
         touchTriggered: String(_raw?.[11] ?? _raw?.["11"] ?? "0") === "1",
-        targetGroup: parseInt(_raw[51] ?? 0, 10),
+        targetGroup: this._parseSingleTriggerGroupId(_raw[51] ?? _raw["51"], 0),
         delay: Math.max(0, parseFloat(_raw[63] ?? 0) || 0),
         randomDelay: Math.max(0, parseFloat(_raw[556] ?? _raw["556"] ?? 0) || 0)
       });
@@ -3831,6 +3836,9 @@ window.LevelObject = class LevelObject {
     this._moveTriggerIdx = 0;
     this._activeMoveTweens = [];
     this._touchMoveTriggerActivated = new Set();
+    this._touchAlphaTriggerActivated = new Set();
+    this._touchRotateTriggerActivated = new Set();
+    this._touchPulseTriggerActivated = new Set();
     this._groupOffsets = {};
 
     const seenSprites = new Set();
@@ -4021,14 +4029,34 @@ window.LevelObject = class LevelObject {
     this._spawnTriggerIdx = 0;
     this._activeSpawnDelays = [];
     this._touchSpawnTriggerActivated = new Set();
+    this._touchAlphaTriggerActivated = new Set();
+    this._touchRotateTriggerActivated = new Set();
+    this._touchPulseTriggerActivated = new Set();
   }
 
   checkAlphaTriggers(playerX) {
     while (this._alphaTriggerIdx < this._alphaTriggers.length) {
       const trig = this._alphaTriggers[this._alphaTriggerIdx];
       if (trig.x > playerX) break;
-      if (!trig.spawnTriggered) this._startAlphaTriggerTween(trig);
+      if (!trig.spawnTriggered && !trig.touchTriggered) this._startAlphaTriggerTween(trig);
       this._alphaTriggerIdx++;
+    }
+  }
+
+  checkTouchAlphaTriggers(playerX, playerY) {
+    const px = Number(playerX) || 0;
+    const py = Number(playerY) || 0;
+    this._touchAlphaTriggerActivated ||= new Set();
+    const playerHalfSize = (typeof playerSize === "number" ? playerSize : 20);
+    const halfHitbox = 30 + playerHalfSize;
+    for (const trig of this._alphaTriggers) {
+      if (!trig?.touchTriggered || trig.spawnTriggered || !this._isTriggerSaveObjectLive(trig.uid)) continue;
+      const uid = trig.uid ?? `${trig.x},${trig.targetGroup}`;
+      if (this._touchAlphaTriggerActivated.has(uid)) continue;
+      if (Math.abs(px - trig.x) <= halfHitbox && Math.abs(py - (trig.y ?? 0)) <= halfHitbox) {
+        this._touchAlphaTriggerActivated.add(uid);
+        this._startAlphaTriggerTween(trig);
+      }
     }
   }
 
@@ -4073,6 +4101,7 @@ window.LevelObject = class LevelObject {
   resetAlphaTriggers() {
     this._alphaTriggerIdx = 0;
     this._activeAlphaTweens = [];
+    this._touchAlphaTriggerActivated = new Set();
     this._groupOpacity = {};
     for (const gid in this._groupSprites) {
       for (const spr of this._groupSprites[gid]) {
@@ -4093,8 +4122,25 @@ window.LevelObject = class LevelObject {
     while (this._rotateTriggerIdx < this._rotateTriggers.length) {
       const trig = this._rotateTriggers[this._rotateTriggerIdx];
       if (trig.x > playerX) break;
-      if (!trig.spawnTriggered) this._startRotateTriggerTween(trig);
+      if (!trig.spawnTriggered && !trig.touchTriggered) this._startRotateTriggerTween(trig);
       this._rotateTriggerIdx++;
+    }
+  }
+
+  checkTouchRotateTriggers(playerX, playerY) {
+    const px = Number(playerX) || 0;
+    const py = Number(playerY) || 0;
+    this._touchRotateTriggerActivated ||= new Set();
+    const playerHalfSize = (typeof playerSize === "number" ? playerSize : 20);
+    const halfHitbox = 30 + playerHalfSize;
+    for (const trig of this._rotateTriggers) {
+      if (!trig?.touchTriggered || trig.spawnTriggered || !this._isTriggerSaveObjectLive(trig.uid)) continue;
+      const uid = trig.uid ?? `${trig.x},${trig.targetGroup}`;
+      if (this._touchRotateTriggerActivated.has(uid)) continue;
+      if (Math.abs(px - trig.x) <= halfHitbox && Math.abs(py - (trig.y ?? 0)) <= halfHitbox) {
+        this._touchRotateTriggerActivated.add(uid);
+        this._startRotateTriggerTween(trig);
+      }
     }
   }
 
@@ -4171,6 +4217,7 @@ window.LevelObject = class LevelObject {
   resetRotateTriggers() {
     this._rotateTriggerIdx = 0;
     this._activeRotateTweens = [];
+    this._touchRotateTriggerActivated = new Set();
     const seenSprites = new Set();
     for (const gid in this._groupSprites) {
       for (const spr of this._groupSprites[gid]) {
@@ -4225,8 +4272,26 @@ window.LevelObject = class LevelObject {
     while (this._pulseTriggerIdx < this._pulseTriggers.length) {
       const trig = this._pulseTriggers[this._pulseTriggerIdx];
       if (trig.x > playerX) break;
-      if (!trig.spawnTriggered) this._startPulseTrigger(trig);
+      if (!trig.spawnTriggered && !trig.touchTriggered) this._startPulseTrigger(trig);
       this._pulseTriggerIdx++;
+    }
+  }
+
+  checkTouchPulseTriggers(playerX, playerY) {
+    if (window.enableLDM) return;
+    const px = Number(playerX) || 0;
+    const py = Number(playerY) || 0;
+    this._touchPulseTriggerActivated ||= new Set();
+    const playerHalfSize = (typeof playerSize === "number" ? playerSize : 20);
+    const halfHitbox = 30 + playerHalfSize;
+    for (const trig of this._pulseTriggers) {
+      if (!trig?.touchTriggered || trig.spawnTriggered || !this._isTriggerSaveObjectLive(trig.uid)) continue;
+      const uid = trig.uid ?? `${trig.x},${trig.targetGroup},${trig.targetChannel}`;
+      if (this._touchPulseTriggerActivated.has(uid)) continue;
+      if (Math.abs(px - trig.x) <= halfHitbox && Math.abs(py - (trig.y ?? 0)) <= halfHitbox) {
+        this._touchPulseTriggerActivated.add(uid);
+        this._startPulseTrigger(trig);
+      }
     }
   }
   stepPulseTriggers(dt, colorManager) {
@@ -4293,6 +4358,7 @@ window.LevelObject = class LevelObject {
   resetPulseTriggers() {
     this._pulseTriggerIdx = 0;
     this._activePulses = [];
+    this._touchPulseTriggerActivated = new Set();
   }
 
   applyColorChannels(colorManager) {
