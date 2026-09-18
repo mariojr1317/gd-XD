@@ -95,10 +95,11 @@
       player._swingCeilingGuide.setDepth(100);
     }
 
-    const cameraY = Number(scene._cameraY) || 0;
     const size = player.p.isMini ? 18 : 30;
-    // Draw the guide at the exact same ceiling used by Ship/Fly collision.
-    const screenY = b(ceiling - size) + cameraY;
+    // This graphics object uses screen coordinates (scroll factor 0), so
+    // cameraY must NOT be added. Ship/Fly collision still uses the same
+    // world-space ceiling value.
+    const screenY = b(ceiling - size);
     const width = typeof screenWidth === 'number' ? screenWidth : 1200;
 
     player._swingCeilingGuide.clear();
