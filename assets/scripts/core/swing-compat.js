@@ -95,6 +95,7 @@
 
     const cameraY = Number(scene._cameraY) || 0;
     const size = player.p.isMini ? 18 : 30;
+    // Draw the guide at the exact same ceiling used by Ship/Fly collision.
     const screenY = b(ceiling - size) + cameraY;
     const width = typeof screenWidth === 'number' ? screenWidth : 1200;
 
@@ -165,10 +166,14 @@
     const floor = Number(player._gameLayer?.getFloorY?.());
     const ceiling = Number(player._gameLayer?.getCeilingY?.());
     if (!Number.isFinite(floor) || !Number.isFinite(ceiling)) return;
+
+    // Swing uses exactly the same vertical limits as Ship/Fly.
+    // The player's center stays one player-size away from each boundary.
     const size = player.p.isMini ? 18 : 30;
     const minY = floor + size;
     const maxY = ceiling - size;
     if (minY > maxY) return;
+
     if (player.p.y < minY) {
       player.p.y = minY;
       player.p.yVelocity = 0;
