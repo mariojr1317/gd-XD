@@ -204,12 +204,6 @@
     player.exitUfoMode?.();
     player.p.isSwing = true;
     player.p.isFlying = false;
-    // Swing uses the same fly bounds as Ship. This creates the real physical ceiling.
-    if (typeof player._setGamemodeFlyBounds === 'function') {
-      const spawnY = Number.isFinite(Number(player.p.y)) ? player.p.y : 30;
-      player._setGamemodeFlyBounds(true, spawnY, typeof f === 'number' ? f : 600, false);
-      player._swingOwnsFlyBounds = true;
-    }
     player.p.isUfo = false;
     player.p.isBall = false;
     player.p.isWave = false;
@@ -253,10 +247,6 @@
     player._swingAnimRotation = 0;
     player._swingAnimProgress = 1;
     player._swingAnimActive = false;
-    if (player._swingOwnsFlyBounds && typeof player._setGamemodeFlyBounds === 'function') {
-      player._setGamemodeFlyBounds(false, 0);
-      player._swingOwnsFlyBounds = false;
-    }
     setSwingVisible(player, false);
     if (player._swingCeilingGuide) player._swingCeilingGuide.setVisible(false);
     player.setCubeVisible(!player.p.isFlying && !player.p.isWave && !player.p.isUfo && !player.p.isSpider && !player.p.isRobot);
@@ -342,22 +332,43 @@
           return;
         }
         if (this.p?.isSwing) {
+          // Temporarily expose Swing as Fly so the original collision code applies
+          // the exact Ship/Fly ceiling and, importantly, can process other portals.
+          const savedSwing = this.p.isSwing;
           const savedFlying = this.p.isFlying;
           const savedGround = this.p.onGround;
           const savedCeiling = this.p.onCeiling;
+          this.p.isSwing = false;
           this.p.isFlying = true;
+          let result;
           try {
-            return originalCheckCollisions.apply(this, args);
+            result = originalCheckCollisions.apply(this, args);
           } finally {
             this.p.isFlying = savedFlying;
             this.p.onGround = savedGround;
             this.p.onCeiling = savedCeiling;
-            this.p.isSwing = true;
+          }
+
+          // If another gamemode portal changed the mode, keep that new mode.
+          const changedMode =
+            !this.p.isSwing ||
+            this.p.isFlying ||
+            this.p.isWave ||
+            this.p.isUfo ||
+            this.p.isBall ||
+            this.p.isSpider ||
+            this.p.isRobot;
+
+          if (!changedMode) {
+            this.p.isSwing = savedSwing;
+            this.p.isFlying = false;
             this.setShipVisible(false);
             setSwingVisible(this, true);
             clampSwingToBounds(this);
             syncSwingCeiling(this);
           }
+
+          return result;
         }
         return originalCheckCollisions.apply(this, args);
       };
