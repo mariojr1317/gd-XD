@@ -1990,6 +1990,45 @@ if (this.p.isFlying || this.p.isUfo) {
     if (this._scene?._isDual) return;
     this._gameLayer.setFlyMode(...args);
   }
+  enterCubeMode() {
+    // Cube is the normal/default gamemode: no vertical teleport and no
+    // portal-specific Y repositioning. Preserve the player's current Y.
+    if (this.p.isSwing && typeof this.exitSwingMode === "function") {
+      this.exitSwingMode();
+    }
+    this.exitSpiderMode();
+    this.exitRobotMode();
+    this.exitShipMode();
+    this.exitBallMode();
+    this.exitWaveMode();
+    this.exitUfoMode();
+
+    this.p.isFlying = false;
+    this.p.isBall = false;
+    this.p.isWave = false;
+    this.p.isUfo = false;
+    this.p.isSpider = false;
+    this.p.isRobot = false;
+    this.p.isSwing = false;
+    this.p.isJetpack = false;
+    this.p.onGround = false;
+    this.p.onCeiling = false;
+    this.p.canJump = false;
+    this.p.isJumping = false;
+    this.stopRotation();
+    this._rotation = 0;
+
+    this.setShipVisible(false);
+    this.setBallVisible(false);
+    this.setWaveVisible(false);
+    this.setSpiderVisible(false);
+    this.setRobotVisible(false);
+    this.setCubeVisible(true);
+
+    // Do not change p.y: a Cube portal changes gamemode only.
+    this._setGamemodeFlyBounds(false, 0);
+  }
+
   enterShipMode(_0xeb37c6 = null, fromCheckpoint = false) {
     if (this.p.isFlying) {
       return;
@@ -4336,6 +4375,7 @@ if (this.p.isFlying || this.p.isUfo) {
             this.exitBallMode();
             this.exitWaveMode();
             this.exitUfoMode();
+            this.enterCubeMode();
           }
         } else if (_colType === "portal_ball") {
           if (!this._isObjectActivated(gameObj)) {
