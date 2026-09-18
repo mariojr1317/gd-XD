@@ -4626,11 +4626,35 @@ if (this.p.isFlying || this.p.isUfo) {
               const _spPlayerSize = this.p.isMini ? 18 : 30;
               const _spGoingUp = !this.p.gravityFlipped;
               const _spWorldX = this._scene?._playerWorldX ?? centerX;
-              const _spSurfaceY = this._findSpiderTeleportSurface?.(
+              let _spSurfaceY = this._findSpiderTeleportSurface?.(
                 _spGoingUp,
                 _spWorldX,
                 _spPlayerSize
               );
+
+              // Robust fallback for Web Dashers levels where the native
+              // spider-surface helper has no candidate. Spider Orb 3004
+              // must still find the nearest solid platform in the direction
+              // opposite the current gravity.
+              if (_spSurfaceY === null || !Number.isFinite(_spSurfaceY)) {
+                const _spObjects = this._gameLayer?.objects || [];
+                let _spBestDistance = Infinity;
+                for (const _spObj of _spObjects) {
+                  if (!_spObj || _spObj.type !== solidType) continue;
+                  const _spHalfW = Math.max(0, Number(_spObj.w) || 0) / 2;
+                  if (Math.abs(_spWorldX - Number(_spObj.x)) > _spHalfW + _spPlayerSize) continue;
+                  const _spTop = Number(_spObj.y) + Math.max(0, Number(_spObj.h) || 0) / 2;
+                  const _spBottom = Number(_spObj.y) - Math.max(0, Number(_spObj.h) || 0) / 2;
+                  const _spCandidate = _spGoingUp ? _spTop : _spBottom;
+                  const _spDelta = _spCandidate - this.p.y;
+                  if ((_spGoingUp && _spDelta <= 0) || (!_spGoingUp && _spDelta >= 0)) continue;
+                  const _spDistance = Math.abs(_spDelta);
+                  if (_spDistance < _spBestDistance) {
+                    _spBestDistance = _spDistance;
+                    _spSurfaceY = _spCandidate;
+                  }
+                }
+              }
 
               this._setObjectActivated(gameObj, true);
               this._consumeOrbActivationInput();
