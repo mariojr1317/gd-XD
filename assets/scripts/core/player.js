@@ -4630,20 +4630,32 @@ if (this.p.isFlying || this.p.isUfo) {
                 this.flipGravity(!this.p.gravityFlipped);
                 this._syncOtherDualGravityForBlueBoost();
                 _boostedThisStep = true;
-              } else if (_orbId === 444) {
+              } else if (_orbId === 3004) {
+                // Spider Orb: arrow direction selects the destination surface.
                 const _spPlayerSize = this.p.isMini ? 18 : 30;
-                const _spFloorY = this._gameLayer.getFloorY();
-                const _spCeilY  = this._gameLayer.getCeilingY() || f;
-                if (!this.p.gravityFlipped) {
+                const _spFloorY = Number(this._gameLayer?.getFloorY?.());
+                const _spCeilY = Number(this._gameLayer?.getCeilingY?.());
+                let _spAngle = Number(gameObj.orbRotation);
+                if (!Number.isFinite(_spAngle)) _spAngle = Number(gameObj.rotationDegrees);
+                if (!Number.isFinite(_spAngle)) _spAngle = 0;
+                _spAngle = ((_spAngle % 360) + 360) % 360;
+                let _spPointsUp = _spAngle < 90 || _spAngle >= 270;
+                if (gameObj.flipY) _spPointsUp = !_spPointsUp;
+
+                if (_spPointsUp && Number.isFinite(_spCeilY)) {
                   this.p.y = _spCeilY - _spPlayerSize;
                   this.flipGravity(true, 1.0);
-                  this.playGravityEffect(true);
-                } else {
+                  this.p.onCeiling = true;
+                } else if (!_spPointsUp && Number.isFinite(_spFloorY)) {
                   this.p.y = _spFloorY + _spPlayerSize;
                   this.flipGravity(false, 1.0);
-                  this.playGravityEffect(false);
+                  this.p.onCeiling = false;
+                } else {
+                  this.flipGravity(_spPointsUp, 1.0);
                 }
+
                 this._syncOtherDualGravityForBlueBoost();
+                this.playGravityEffect(_spPointsUp);
                 this.p.yVelocity = 0;
                 this.p.onGround = false;
                 this.p.canJump = false;
