@@ -2456,7 +2456,7 @@ window.LevelObject = class LevelObject {
         }
       }
 
-      if (objectDef && objectDef.type === ringType) {
+      if (objectDef && (objectDef.type === ringType || objectId === 3004)) {
         sprite.setScale(0.75);
         sprite._eeAudioScale = true;
         sprite._orbId = levelObj.id;
@@ -3062,7 +3062,7 @@ window.LevelObject = class LevelObject {
         }
         this.topContainer.add(_padEmitter);
       }
-    } else if (objectDef.type === ringType) {
+    } else if (objectDef.type === ringType || Number(levelObj.id) === 3004) {
       const orbW = objectDef.gridW * a;
       const orbH = objectDef.gridH * a;
       const orbObj = new Collider(jumpRingType, worldX, worldY, orbW, orbH, levelObj.rot || 0);
