@@ -224,6 +224,7 @@
     player._swingAnimActive = false;
     player.stopRotation?.();
     player._rotation = 0;
+    player._setGamemodeFlyBounds?.(true, 0);
     player.setCubeVisible(false);
     player.setShipVisible(false);
     player.setBallVisible?.(false);
@@ -238,6 +239,7 @@
   function exitSwing(player) {
     if (!player?.p?.isSwing) return;
     player.p.isSwing = false;
+    player._setGamemodeFlyBounds?.(false, 0);
     player.p.onGround = false;
     player.p.onCeiling = false;
     player.p.canJump = false;
