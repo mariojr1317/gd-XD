@@ -948,9 +948,42 @@ window.LevelObject = class LevelObject {
     this._userCoinSlotCount = 0;
     this._sourceLevelObjects = levelObjects;
     this._spawnLevelObjects(levelObjects);
+    // GD levels are not required to store trigger objects in strict X order.
+    // Keep every runtime trigger queue ordered before gameplay starts.
+    this._sortTriggerQueues();
     this._setUpSettings(settingslist);
     window.levelObjects = levelObjects;
     window.settingslist = settingslist;
+  }
+
+  _sortTriggerQueues() {
+    const sortByX = (list) => {
+      if (!Array.isArray(list) || list.length < 2) return;
+      list.sort((a, b) => {
+        const ax = Number(a?.x);
+        const bx = Number(b?.x);
+        if (!Number.isFinite(ax) && !Number.isFinite(bx)) return 0;
+        if (!Number.isFinite(ax)) return 1;
+        if (!Number.isFinite(bx)) return -1;
+        return ax - bx;
+      });
+    };
+
+    sortByX(this._colorTriggers);
+    sortByX(this._moveTriggers);
+    sortByX(this._alphaTriggers);
+    sortByX(this._rotateTriggers);
+    sortByX(this._pulseTriggers);
+    sortByX(this._spawnTriggers);
+    sortByX(this._enterEffectTriggers);
+
+    this._colorTriggerIdx = 0;
+    this._moveTriggerIdx = 0;
+    this._alphaTriggerIdx = 0;
+    this._rotateTriggerIdx = 0;
+    this._pulseTriggerIdx = 0;
+    this._spawnTriggerIdx = 0;
+    this._enterEffectTriggerIdx = 0;
   }
 
   _isOfficialLevel() {
