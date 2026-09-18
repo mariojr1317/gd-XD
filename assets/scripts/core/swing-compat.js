@@ -272,17 +272,24 @@
     PlayerObject.prototype.enterSwingMode = function() { enterSwing(this); };
     PlayerObject.prototype.exitSwingMode = function() { exitSwing(this); };
 
-    const originalEnterShipMode = PlayerObject.prototype.enterShipMode;
-    if (typeof originalEnterShipMode === 'function' && !PlayerObject.prototype.__gd22SwingShipGuardPatched) {
-      PlayerObject.prototype.__gd22SwingShipGuardPatched = true;
-      PlayerObject.prototype.enterShipMode = function(...args) {
-        if (this.p?.isSwing) {
-          this.p.isFlying = false;
-          this.setShipVisible(false);
-          return;
+    // Every real gamemode portal must be allowed to leave Swing.
+    // Wrap the mode-entry functions so Swing never remains active alongside another mode.
+    const modeEntries = [
+      'enterCubeMode', 'enterShipMode', 'enterBallMode',
+      'enterWaveMode', 'enterUfoMode', 'enterRobotMode', 'enterSpiderMode'
+    ];
+    for (const method of modeEntries) {
+      const original = PlayerObject.prototype[method];
+      if (typeof original === 'function') {
+        const flag = '__gd22SwingExit_' + method;
+        if (!PlayerObject.prototype[flag]) {
+          PlayerObject.prototype[flag] = true;
+          PlayerObject.prototype[method] = function(...args) {
+            if (this.p?.isSwing) exitSwing(this);
+            return original.apply(this, args);
+          };
         }
-        return originalEnterShipMode.apply(this, args);
-      };
+      }
     }
 
     const originalUpdateJump = PlayerObject.prototype.updateJump;
@@ -326,50 +333,16 @@
             break;
           }
         }
+
+        // Run the normal collision engine unchanged. It now handles the real
+        // Ship/Fly ceiling and every other portal. Swing only supplies its own
+        // movement between portal transitions.
         if (enteredThisFrame) {
           this._lastCollisionWorldX = Number(args[0]) + (typeof centerX === 'number' ? centerX : 0);
           this._lastCollisionWorldY = this.p.y;
           return;
         }
-        if (this.p?.isSwing) {
-          // Temporarily expose Swing as Fly so the original collision code applies
-          // the exact Ship/Fly ceiling and, importantly, can process other portals.
-          const savedSwing = this.p.isSwing;
-          const savedFlying = this.p.isFlying;
-          const savedGround = this.p.onGround;
-          const savedCeiling = this.p.onCeiling;
-          this.p.isSwing = false;
-          this.p.isFlying = true;
-          let result;
-          try {
-            result = originalCheckCollisions.apply(this, args);
-          } finally {
-            this.p.isFlying = savedFlying;
-            this.p.onGround = savedGround;
-            this.p.onCeiling = savedCeiling;
-          }
 
-          // If another gamemode portal changed the mode, keep that new mode.
-          const changedMode =
-            !this.p.isSwing ||
-            this.p.isFlying ||
-            this.p.isWave ||
-            this.p.isUfo ||
-            this.p.isBall ||
-            this.p.isSpider ||
-            this.p.isRobot;
-
-          if (!changedMode) {
-            this.p.isSwing = savedSwing;
-            this.p.isFlying = false;
-            this.setShipVisible(false);
-            setSwingVisible(this, true);
-            clampSwingToBounds(this);
-            syncSwingCeiling(this);
-          }
-
-          return result;
-        }
         return originalCheckCollisions.apply(this, args);
       };
     }
