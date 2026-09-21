@@ -3617,6 +3617,11 @@ if (this.p.isFlying || this.p.isUfo) {
   _shouldPrioritizeGroundOrbInput() {
     if (!(this.p.isBall || this.p.isSpider)) return false;
     if (!this.p.upKeyPressed) return false;
+    if (this.p.isSpider) {
+      // Spider orbs must remain activatable even when the current frame has
+      // not yet marked the player as onGround/canJump after a teleport.
+      return this._isTouchingAvailableOrbForInput(false);
+    }
     if (!(this.p.canJump || this.p.onGround || this.p.onCeiling)) return false;
     return this._isTouchingAvailableOrbForInput(false);
   }
@@ -4276,8 +4281,16 @@ if (this.p.isFlying || this.p.isUfo) {
         _broadPhaseHit = !(pieceWidth + _broadSize <= rotatedLeft) && !(pieceWidth - _broadSize >= rotatedRight) && !(playersY + _broadSize <= rotatedTop) && !(playersY - _broadSize >= rotatedBottom);
       }
       const _colType = gameObj.type;
-      if (!_broadPhaseHit && _colType === "portal_teleport") {
-        _broadPhaseHit = this._isPlayerTouchingPortalHitbox(gameObj, pieceWidth, playersY, _broadSize, previousWorldX, previousCollisionWorldY);
+      if (String(_colType || "").startsWith("portal_")) {
+        // Use the exact portal hitbox for every portal, including Spider.
+        _broadPhaseHit = this._isPlayerTouchingPortalHitbox(
+          gameObj,
+          pieceWidth,
+          playersY,
+          _broadSize,
+          previousWorldX,
+          previousCollisionWorldY
+        );
       }
       if (_broadPhaseHit) {
         if (!_hasCircleHitbox && this._isPortalCollisionType(_colType)) {
