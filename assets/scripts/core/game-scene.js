@@ -4719,6 +4719,11 @@ this._menuUpdateLogBtn = this.add.image(screenWidth - 30 - 50, 33, "GJ_WebSheet"
       lastInputDelayMs: 0
     };
     this._physicsTimingDebugger = null;
+    this._physicsTimingToggleKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+    this._physicsTimingToggleKey.on("down", () => {
+      if (this._menuActive || this._paused || this._levelSelectOverlay || this._levelWon || window.isEditor) return;
+      this._setPhysicsTimingDebugger(!this._physicsTimingState.visible);
+    });
   }
   _createStartPosGui() {
         const centerX = screenWidth / 2;
