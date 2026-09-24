@@ -9871,7 +9871,7 @@ window.open("https://github.com/web-dashers/web-dashers.github.io", "_blank"); }
         const tint = isActive ? 0xffffff : 0x666666;
         const btn9 = this.add.nineslice(0, 0, "GJ_button01", null, btnW, _sBtnH, _sBtnBorder, _sBtnBorder, _sBtnBorder, _sBtnBorder).setOrigin(0.5).setTint(tint);
         grp.add(btn9);
-        const fontSize = label === "How To Play" ? 41 : 50;
+        const fontSize = label === "How To Play" ? 41 : (label === "Physics / Timing" ? 32 : 50);
         const lbl = this.add.bitmapText(0, -5, "goldFont", label, fontSize).setOrigin(0.5, 0.5);
         if (!isActive) lbl.setTint(0x666666);
         grp.add(lbl);
