@@ -5580,23 +5580,22 @@ _buildSettingsPopup() {
 
     if (this._physicsTimingDebugger) return;
 
-    const panel = this.add.container(18, 18)
+    const panel = this.add.container(6, 6)
       .setScrollFactor(0)
       .setDepth(1200);
 
-    const bg = this.add.rectangle(0, 0, 330, 214, 0x000000, 0.78)
-      .setOrigin(0, 0)
-      .setStrokeStyle(2, 0xffffff, 0.35);
-
-    const title = this.add.bitmapText(12, 10, "bigFont", "Physics / Timing", 30)
+    const bg = this.add.rectangle(0, 0, 180, 78, 0x000000, 0.65)
       .setOrigin(0, 0);
 
-    const stats = this.add.bitmapText(12, 48, "goldFont", "", 22)
+    const title = this.add.bitmapText(5, 3, "bigFont", "Physics / Timing", 12)
       .setOrigin(0, 0);
 
-    const hint = this.add.bitmapText(12, 184, "bigFont", "240 Hz physics target", 17)
+    const stats = this.add.bitmapText(5, 18, "goldFont", "", 10)
+      .setOrigin(0, 0);
+
+    const hint = this.add.bitmapText(5, 68, "bigFont", "240 Hz", 8)
       .setOrigin(0, 0)
-      .setAlpha(0.75);
+      .setAlpha(0.65);
 
     panel.add([bg, title, stats, hint]);
     panel._statsText = stats;
@@ -5615,14 +5614,9 @@ _buildSettingsPopup() {
       : state.lastInputDelayMs.toFixed(2) + " ms";
 
     panel._statsText.setText(
-      "Render FPS: " + (this._debugRenderFps || "—") +
-      "\nPhysics Hz: " + physicsHz +
-      "\nPhysics Frame: " + this._physicsFrame +
-      "\nSubsteps/frame: " + state.lastSubSteps +
-      "\nInput Queue: " + (this._inputQueue?.length || 0) +
-      "\nLast Input: " + state.lastInputType +
-      "\nInput Physics Frame: " + inputFrame +
-      "\nInput Delay: " + inputDelay
+      "FPS: " + (this._debugRenderFps || "—") + "  PHY: " + physicsHz +
+      "\nF: " + this._physicsFrame + "  S: " + state.lastSubSteps +
+      "\nQ: " + (this._inputQueue?.length || 0) + "  IN: " + inputDelay
     );
   }
 
