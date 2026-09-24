@@ -3872,16 +3872,25 @@ this._menuUpdateLogBtn = this.add.image(screenWidth - 30 - 50, 33, "GJ_WebSheet"
     this._pauseContainer = null;
     this._sfxVolume = localStorage.getItem("userSfxVol") ?? 1;
     this._initMacroBot();
-    this.input.on("pointerdown", () => {
-      if (!this._menuActive && !this._paused && !this._levelSelectOverlay && !this._levelWon && !window.isEditor) {
-        this._pushButton();
+    // Timestamped pointer input: keep clicks between Phaser/render frames
+    // so the 240 Hz physics loop can consume them on a precise substep.
+    this._inputQueue = [];
+    this._inputQueueSeq = 0;
+    this._inputQueueHeld = false;
+    this._queuePointerInput = (type) => {
+      if (this._menuActive || this._paused || this._levelSelectOverlay || this._levelWon || window.isEditor) return;
+      this._inputQueue.push({
+        type,
+        time: performance.now(),
+        seq: this._inputQueueSeq++
+      });
+      // Prevent an unbounded queue if the tab is stalled.
+      if (this._inputQueue.length > 32) {
+        this._inputQueue.splice(0, this._inputQueue.length - 32);
       }
-    });
-    this.input.on("pointerup", () => {
-      if (!this._menuActive && !this._paused && !this._levelSelectOverlay && !this._levelWon && !window.isEditor) {
-        this._releaseButton();
-      }
-    });
+    };
+    this.input.on("pointerdown", () => this._queuePointerInput("press"));
+    this.input.on("pointerup", () => this._queuePointerInput("release"));
     if (!window.gdpointerup) {
       window.gdpointerup = true;
       window.addEventListener("pointerup", () => this._releaseButton(true));
@@ -8403,9 +8412,22 @@ _showwippopup() {
     let horizontalDelta = subStepDelta * playerSpeed * d;
     const initialY = this._state.y;
     const initialY2 = this._state2.y;
+    const inputStepMs = subSteps > 0 ? (subStepDelta * 1000 / 60) : 0;
+    let inputStepTime = performance.now() - Math.max(0, deltaTime);
     for (let i = 0; i < subSteps; i++) {
+      inputStepTime += inputStepMs;
       this._state.lastY = this._state.y;
       this._physicsFrame++;
+      while (this._inputQueue?.length && this._inputQueue[0].time <= inputStepTime) {
+        const inputEvent = this._inputQueue.shift();
+        if (inputEvent.type === "press") {
+          this._pushButton();
+          this._inputQueueHeld = true;
+        } else {
+          this._releaseButton();
+          this._inputQueueHeld = false;
+        }
+      }
       this._applyJumpInput();
       if (this._macroBot?.playing) {
         this._macroBot.step(this._physicsFrame);
