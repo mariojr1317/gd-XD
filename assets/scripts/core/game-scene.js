@@ -8149,6 +8149,7 @@ _showwippopup() {
       this._fpsAccum = 0;
       this._fpsFrames = 0;
     }
+    this._updatePhysicsTimingDebugger();
     if (this._paused) {
       if (!this._updateLogPopup && (this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown || this._lKey.isDown) && !this._spaceWasDown && !this._settingsPopup) {
         setTimeout(() => {
