@@ -4707,6 +4707,18 @@ this._menuUpdateLogBtn = this.add.image(screenWidth - 30 - 50, 33, "GJ_WebSheet"
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(999).setVisible(false);
     this._fpsAccum = 0;
     this._fpsFrames = 0;
+    this._debugRenderFps = 0;
+    this._physicsTimingState = {
+      visible: false,
+      physicsHz: 0,
+      physicsSteps: 0,
+      physicsAccumMs: 0,
+      lastSubSteps: 0,
+      lastInputType: "—",
+      lastInputPhysicsFrame: 0,
+      lastInputDelayMs: 0
+    };
+    this._physicsTimingDebugger = null;
   }
   _createStartPosGui() {
         const centerX = screenWidth / 2;
@@ -5547,6 +5559,68 @@ _buildSettingsPopup() {
         easeParams: [1, 0.6]
     });
   }
+  _setPhysicsTimingDebugger(visible) {
+    const enabled = !!visible;
+    if (this._physicsTimingState) {
+      this._physicsTimingState.visible = enabled;
+    }
+
+    if (!enabled) {
+      if (this._physicsTimingDebugger) {
+        this._physicsTimingDebugger.destroy();
+        this._physicsTimingDebugger = null;
+      }
+      return;
+    }
+
+    if (this._physicsTimingDebugger) return;
+
+    const panel = this.add.container(18, 18)
+      .setScrollFactor(0)
+      .setDepth(1200);
+
+    const bg = this.add.rectangle(0, 0, 330, 214, 0x000000, 0.78)
+      .setOrigin(0, 0)
+      .setStrokeStyle(2, 0xffffff, 0.35);
+
+    const title = this.add.bitmapText(12, 10, "bigFont", "Physics / Timing", 30)
+      .setOrigin(0, 0);
+
+    const stats = this.add.bitmapText(12, 48, "goldFont", "", 22)
+      .setOrigin(0, 0);
+
+    const hint = this.add.bitmapText(12, 184, "bigFont", "240 Hz physics target", 17)
+      .setOrigin(0, 0)
+      .setAlpha(0.75);
+
+    panel.add([bg, title, stats, hint]);
+    panel._statsText = stats;
+    this._physicsTimingDebugger = panel;
+  }
+
+  _updatePhysicsTimingDebugger() {
+    const state = this._physicsTimingState;
+    const panel = this._physicsTimingDebugger;
+    if (!state || !panel || !panel._statsText) return;
+
+    const physicsHz = state.physicsHz > 0 ? state.physicsHz.toFixed(1) : "—";
+    const inputFrame = state.lastInputPhysicsFrame || "—";
+    const inputDelay = state.lastInputType === "—"
+      ? "—"
+      : state.lastInputDelayMs.toFixed(2) + " ms";
+
+    panel._statsText.setText(
+      "Render FPS: " + (this._debugRenderFps || "—") +
+      "\nPhysics Hz: " + physicsHz +
+      "\nPhysics Frame: " + this._physicsFrame +
+      "\nSubsteps/frame: " + state.lastSubSteps +
+      "\nInput Queue: " + (this._inputQueue?.length || 0) +
+      "\nLast Input: " + state.lastInputType +
+      "\nInput Physics Frame: " + inputFrame +
+      "\nInput Delay: " + inputDelay
+    );
+  }
+
   _saveSettings() {
     const settings = {
         noclip: window.noClip,
@@ -5556,6 +5630,7 @@ _buildSettingsPopup() {
         startPosSwitcher: window.startPosSwitcher,
         hitboxTrail: window.showHitboxTrail,
         showFPS: this._fpsText.visible,
+        showPhysicsTimingDebugger: !!this._physicsTimingState?.visible,
         solidWaveTrail: window.solidWave,
         noclipAccuracy: window.noClipAccuracy,
         hitboxesOnDeath: window.hitboxesOnDeath,
@@ -5588,6 +5663,7 @@ _buildSettingsPopup() {
         startPosSwitcher: false,
         hitboxTrail: false,
         showFPS: false,
+        showPhysicsTimingDebugger: false,
         solidWaveTrail: false,
         noclipAccuracy: false,
         hitboxesOnDeath: false,
@@ -5616,6 +5692,7 @@ _buildSettingsPopup() {
     window.startPosSwitcher = data.startPosSwitcher;
     window.showHitboxTrail = data.hitboxTrail;
     this._fpsText.visible = data.showFPS;
+    this._setPhysicsTimingDebugger(!!data.showPhysicsTimingDebugger);
     window.solidWave = data.solidWaveTrail;
     window.noClipAccuracy = data.noclipAccuracy;
     window.hitboxesOnDeath = data.hitboxesOnDeath;
@@ -8062,7 +8139,8 @@ _showwippopup() {
     this._fpsAccum += deltaTime;
     this._fpsFrames++;
     if (this._fpsAccum >= 250) {
-      this._fpsText.setText(Math.round(this._fpsFrames * 1000 / this._fpsAccum));
+      this._debugRenderFps = Math.round(this._fpsFrames * 1000 / this._fpsAccum);
+      this._fpsText.setText(this._debugRenderFps);
       this._fpsAccum = 0;
       this._fpsFrames = 0;
     }
@@ -8408,6 +8486,17 @@ _showwippopup() {
       subSteps = 60;
     }
     let subStepDelta = subSteps > 0 ? quantizedDelta / subSteps : 0;
+    if (this._physicsTimingState) {
+      this._physicsTimingState.lastSubSteps = subSteps;
+      this._physicsTimingState.physicsSteps += subSteps;
+      this._physicsTimingState.physicsAccumMs += deltaTime;
+      if (this._physicsTimingState.physicsAccumMs >= 250) {
+        this._physicsTimingState.physicsHz =
+          this._physicsTimingState.physicsSteps * 1000 / this._physicsTimingState.physicsAccumMs;
+        this._physicsTimingState.physicsSteps = 0;
+        this._physicsTimingState.physicsAccumMs = 0;
+      }
+    }
     let verticalDelta = subStepDelta * d;
     let horizontalDelta = subStepDelta * playerSpeed * d;
     const initialY = this._state.y;
@@ -8426,6 +8515,11 @@ _showwippopup() {
         } else {
           this._releaseButton();
           this._inputQueueHeld = false;
+        }
+        if (this._physicsTimingState) {
+          this._physicsTimingState.lastInputType = inputEvent.type;
+          this._physicsTimingState.lastInputPhysicsFrame = this._physicsFrame;
+          this._physicsTimingState.lastInputDelayMs = Math.max(0, performance.now() - inputEvent.time);
         }
       }
       this._applyJumpInput();
@@ -9814,7 +9908,11 @@ window.open("https://github.com/web-dashers/web-dashers.github.io", "_blank"); }
     _makeSettingsBtn(_sColL, _sRow1Y, "Account",    _sBtnW2, false, null);
     _makeSettingsBtn(_sColR, _sRow1Y, "How To Play", _sBtnW2, true, () => { this._buildHowToPlayPopup(); });
     _makeSettingsBtn(_sColL, _sRow2Y, "Options",    _sBtnW2, true,  () => { this._buildSettingsPopup(); });
-    _makeSettingsBtn(_sColR, _sRow2Y, "Graphics",   _sBtnW2, false, null);
+    _makeSettingsBtn(_sColR, _sRow2Y, "Physics / Timing", _sBtnW2, true, () => {
+      const enabled = !this._physicsTimingState.visible;
+      this._setPhysicsTimingDebugger(enabled);
+      this._hideSettingsScreen();
+    });
     _makeSettingsBtn(_sCol3L, _sRow3Y, "Rate",      _sBtnW3, true, () => { this._redirectRate(); });
     _makeSettingsBtn(_sCol3M, _sRow3Y, "Songs",     _sBtnW3, true, () => { this._hideSettingsScreen(() => this.time.delayedCall(150, () => this._buildsongspopup())); });
     _makeSettingsBtn(_sCol3R, _sRow3Y, "Help",      _sBtnW3, true, () => { this._hideSettingsScreen(() => this.time.delayedCall(150, () => this._buildhelppopup())); });
